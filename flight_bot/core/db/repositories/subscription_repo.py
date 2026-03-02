@@ -19,10 +19,10 @@ class SubscriptionRepository:
         return list(result.scalars().all())
 
     async def create(
-        self, user_id: int, dest_type: str, dest_code: str
+        self, user_id: int, origin_iata: str, dest_type: str, dest_code: str
     ) -> Subscription:
         sub = Subscription(
-            user_id=user_id, dest_type=dest_type, dest_code=dest_code
+            user_id=user_id, origin_iata=origin_iata, dest_type=dest_type, dest_code=dest_code
         )
         self.session.add(sub)
         await self.session.commit()

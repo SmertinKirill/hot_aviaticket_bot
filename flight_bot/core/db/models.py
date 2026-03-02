@@ -91,6 +91,7 @@ class Subscription(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    origin_iata: Mapped[str] = mapped_column(String, ForeignKey("cities.iata"), nullable=False)
     dest_type: Mapped[str] = mapped_column(String, nullable=False)
     dest_code: Mapped[str] = mapped_column(String, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -101,7 +102,7 @@ class Subscription(Base):
     user: Mapped["User"] = relationship(back_populates="subscriptions")
 
     __table_args__ = (
-        UniqueConstraint("user_id", "dest_type", "dest_code", name="uq_user_dest"),
+        UniqueConstraint("user_id", "origin_iata", "dest_type", "dest_code", name="uq_user_origin_dest"),
     )
 
 

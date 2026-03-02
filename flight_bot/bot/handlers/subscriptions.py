@@ -33,30 +33,82 @@ REGIONS = {
 }
 
 
+# --- Начало: выбор города вылета ---
+
 @router.message(Command("subscribe"))
-async def cmd_subscribe(message: Message, session: AsyncSession):
+async def cmd_subscribe(message: Message, state: FSMContext, session: AsyncSession):
     user_repo = UserRepository(session)
     user = await user_repo.get_by_telegram_id(message.from_user.id)
-    if not user or not user.origin_iata:
-        await message.answer(
-            "Сначала укажите город вылета командой /start"
-        )
+    if not user:
+        await message.answer("Сначала выполните /start")
         return
-    await message.answer(
-        "Выберите тип направления:", reply_markup=subscribe_type()
-    )
+    await message.answer("Введите город вылета:")
+    await state.set_state(SubscribeStates.waiting_for_origin_city)
 
 
 @router.callback_query(F.data == "subscribe")
-async def cb_subscribe(callback: CallbackQuery, session: AsyncSession):
+async def cb_subscribe(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     user_repo = UserRepository(session)
     user = await user_repo.get_by_telegram_id(callback.from_user.id)
-    if not user or not user.origin_iata:
-        await callback.answer("Сначала укажите город вылета командой /start")
+    if not user:
+        await callback.answer("Сначала выполните /start")
         return
     await callback.answer()
+    await callback.message.edit_text("Введите город вылета:")
+    await state.set_state(SubscribeStates.waiting_for_origin_city)
+
+
+@router.message(SubscribeStates.waiting_for_origin_city)
+async def process_origin_city_input(
+    message: Message, state: FSMContext, session: AsyncSession
+):
+    query = message.text.strip()
+    cities = await search_cities(session, query)
+
+    if not cities:
+        await message.answer("Город не найден. Попробуйте ещё раз:")
+        return
+
+    if len(cities) == 1:
+        city = cities[0]
+        await state.update_data(origin_iata=city.iata)
+        await state.set_state(None)
+        await message.answer(
+            f"Город вылета: {city.name_ru} ({city.iata})\n\nВыберите тип направления:",
+            reply_markup=subscribe_type(),
+        )
+        return
+
+    if len(cities) <= 8:
+        kb = city_select([(c.iata, c.name_ru) for c in cities])
+        for row in kb.inline_keyboard:
+            for btn in row:
+                iata = btn.callback_data.split(":")[1]
+                btn.callback_data = f"sub_origin_pick:{iata}"
+        await message.answer("Уточните город вылета:", reply_markup=kb)
+        return
+
+    await message.answer(
+        f"Найдено слишком много вариантов ({len(cities)}). Уточните запрос:"
+    )
+
+
+@router.callback_query(F.data.startswith("sub_origin_pick:"))
+async def cb_origin_pick(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+):
+    iata = callback.data.split(":")[1]
+    await callback.answer()
+
+    stmt = select(City.name_ru).where(City.iata == iata)
+    result = await session.execute(stmt)
+    city_name = result.scalar_one_or_none() or iata
+
+    await state.update_data(origin_iata=iata)
+    await state.set_state(None)
     await callback.message.edit_text(
-        "Выберите тип направления:", reply_markup=subscribe_type()
+        f"Город вылета: {city_name} ({iata})\n\nВыберите тип направления:",
+        reply_markup=subscribe_type(),
     )
 
 
@@ -71,10 +123,21 @@ async def cb_sub_region(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("region:"))
-async def cb_region_select(callback: CallbackQuery, session: AsyncSession):
+async def cb_region_select(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+):
     region = callback.data.split(":", 1)[1]
     await callback.answer()
-    await _create_subscription(callback, session, "region", region)
+
+    data = await state.get_data()
+    origin_iata = data.get("origin_iata")
+    if not origin_iata:
+        await callback.message.edit_text(
+            "Сессия истекла. Начните заново с /subscribe"
+        )
+        return
+
+    await _create_subscription(callback, state, session, origin_iata, "region", region)
 
 
 # --- Страна ---
@@ -104,18 +167,23 @@ async def process_country_input(
 
     if len(countries) == 1:
         c = countries[0]
+        data = await state.get_data()
+        origin_iata = data.get("origin_iata")
+        if not origin_iata:
+            await message.answer("Сессия истекла. Начните заново с /subscribe")
+            await state.clear()
+            return
         await state.clear()
-        await _create_subscription_msg(message, session, "country", c.code)
+        await _create_subscription_msg(message, session, origin_iata, "country", c.code)
         return
 
     if len(countries) <= 5:
         kb = country_select([(c.code, c.name_ru) for c in countries])
-        # Меняем callback на sub_country_pick
         for row in kb.inline_keyboard:
             for btn in row:
                 code = btn.callback_data.split(":")[1]
                 btn.callback_data = f"sub_country_pick:{code}"
-        await state.clear()
+        await state.set_state(None)
         await message.answer("Уточните страну:", reply_markup=kb)
         return
 
@@ -125,10 +193,21 @@ async def process_country_input(
 
 
 @router.callback_query(F.data.startswith("sub_country_pick:"))
-async def cb_country_pick(callback: CallbackQuery, session: AsyncSession):
+async def cb_country_pick(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+):
     code = callback.data.split(":")[1]
     await callback.answer()
-    await _create_subscription(callback, session, "country", code)
+
+    data = await state.get_data()
+    origin_iata = data.get("origin_iata")
+    if not origin_iata:
+        await callback.message.edit_text(
+            "Сессия истекла. Начните заново с /subscribe"
+        )
+        return
+
+    await _create_subscription(callback, state, session, origin_iata, "country", code)
 
 
 # --- Город ---
@@ -153,8 +232,14 @@ async def process_city_input(
 
     if len(cities) == 1:
         c = cities[0]
+        data = await state.get_data()
+        origin_iata = data.get("origin_iata")
+        if not origin_iata:
+            await message.answer("Сессия истекла. Начните заново с /subscribe")
+            await state.clear()
+            return
         await state.clear()
-        await _create_subscription_msg(message, session, "city", c.iata)
+        await _create_subscription_msg(message, session, origin_iata, "city", c.iata)
         return
 
     if len(cities) <= 5:
@@ -163,7 +248,7 @@ async def process_city_input(
             for btn in row:
                 iata = btn.callback_data.split(":")[1]
                 btn.callback_data = f"sub_city_pick:{iata}"
-        await state.clear()
+        await state.set_state(None)
         await message.answer("Уточните город:", reply_markup=kb)
         return
 
@@ -173,17 +258,30 @@ async def process_city_input(
 
 
 @router.callback_query(F.data.startswith("sub_city_pick:"))
-async def cb_city_pick(callback: CallbackQuery, session: AsyncSession):
+async def cb_city_pick(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+):
     iata = callback.data.split(":")[1]
     await callback.answer()
-    await _create_subscription(callback, session, "city", iata)
+
+    data = await state.get_data()
+    origin_iata = data.get("origin_iata")
+    if not origin_iata:
+        await callback.message.edit_text(
+            "Сессия истекла. Начните заново с /subscribe"
+        )
+        return
+
+    await _create_subscription(callback, state, session, origin_iata, "city", iata)
 
 
 # --- Создание подписки ---
 
 async def _create_subscription(
     callback: CallbackQuery,
+    state: FSMContext,
     session: AsyncSession,
+    origin_iata: str,
     dest_type: str,
     dest_code: str,
 ):
@@ -196,6 +294,7 @@ async def _create_subscription(
 
     count = await sub_repo.count_active(user.id)
     if count >= 10:
+        await state.clear()
         await callback.message.edit_text(
             "У вас уже 10 подписок — это максимум. "
             "Удалите одну из существующих, чтобы добавить новую."
@@ -203,21 +302,27 @@ async def _create_subscription(
         return
 
     try:
-        await sub_repo.create(user.id, dest_type, dest_code)
+        await sub_repo.create(user.id, origin_iata, dest_type, dest_code)
     except IntegrityError:
         await session.rollback()
+        await state.clear()
         await callback.message.edit_text(
             "Такая подписка у вас уже есть."
         )
         return
 
+    await state.clear()
     label = await _dest_label(session, dest_type, dest_code)
-    await callback.message.edit_text(f"✅ Подписка добавлена: {label}")
+    origin_name = await _city_name(session, origin_iata)
+    await callback.message.edit_text(
+        f"✅ Подписка добавлена: {origin_name} → {label}"
+    )
 
 
 async def _create_subscription_msg(
     message: Message,
     session: AsyncSession,
+    origin_iata: str,
     dest_type: str,
     dest_code: str,
 ):
@@ -237,14 +342,15 @@ async def _create_subscription_msg(
         return
 
     try:
-        await sub_repo.create(user.id, dest_type, dest_code)
+        await sub_repo.create(user.id, origin_iata, dest_type, dest_code)
     except IntegrityError:
         await session.rollback()
         await message.answer("Такая подписка у вас уже есть.")
         return
 
     label = await _dest_label(session, dest_type, dest_code)
-    await message.answer(f"✅ Подписка добавлена: {label}")
+    origin_name = await _city_name(session, origin_iata)
+    await message.answer(f"✅ Подписка добавлена: {origin_name} → {label}")
 
 
 # --- Список подписок ---
@@ -289,7 +395,9 @@ async def _show_subscriptions(
 
     dest_labels = {}
     for sub in subs:
-        dest_labels[sub.id] = await _dest_label(session, sub.dest_type, sub.dest_code)
+        dest_label = await _dest_label(session, sub.dest_type, sub.dest_code)
+        origin_name = await _city_name(session, sub.origin_iata)
+        dest_labels[sub.id] = f"{origin_name} → {dest_label}"
 
     text = f"Твои подписки ({count}/10):"
     kb = subscription_list(subs, dest_labels)
@@ -323,11 +431,17 @@ async def cb_unsub(callback: CallbackQuery, session: AsyncSession):
     else:
         await callback.answer("Подписка не найдена")
 
-    # Обновить список
     await _show_subscriptions(callback, session)
 
 
 # --- Хелперы ---
+
+async def _city_name(session: AsyncSession, iata: str) -> str:
+    """Русское название города по IATA."""
+    stmt = select(City.name_ru).where(City.iata == iata)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none() or iata
+
 
 async def _dest_label(
     session: AsyncSession, dest_type: str, dest_code: str

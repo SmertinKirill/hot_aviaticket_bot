@@ -137,10 +137,7 @@ async def monitor_cycle(bot: Bot) -> None:
             # Группируем по origin_iata
             origin_subs: dict[str, list[Subscription]] = {}
             for sub in all_subs:
-                origin = sub.user.origin_iata
-                if not origin:
-                    continue
-                origin_subs.setdefault(origin, []).append(sub)
+                origin_subs.setdefault(sub.origin_iata, []).append(sub)
 
             logger.info(
                 "Города вылета: %d, подписок: %d",
