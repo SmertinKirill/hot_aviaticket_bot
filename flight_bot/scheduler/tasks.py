@@ -99,8 +99,7 @@ async def _send_notification(
         f"{origin_name} → {dest_name} ({deal['dest_iata']})\n"
         f"📅 Вылет: {date_formatted}\n"
         f"💰 {deal['current_price']:,} ₽  "
-        f"(обычно ~{deal['base_price']:,} ₽, "
-        f"дешевле на {deal['discount_pct']}%)\n\n"
+        f"(ваш порог: {deal['target_price']:,} ₽)\n\n"
         f"⚡ Цена может измениться — бронируйте быстро"
     ).replace(",", " ")
 
@@ -175,16 +174,22 @@ async def monitor_cycle(bot: Bot) -> None:
                 # Проверить подписки
                 for sub in subs:
                     destinations = await resolve_destinations(sub, session)
-                    # Фильтрация тикетов по дате подписки
-                    if sub.date_from is not None:
-                        sub_available = {
-                            t["destination_iata"] for t in tickets
-                            if sub.date_from
-                            <= _parse_ticket_date(t["departure_at"])
-                            <= sub.date_to
-                        }
-                    else:
-                        sub_available = available_dest_iata
+                    # Фильтрация тикетов по дате и пересадкам подписки
+                    def _ticket_matches(t: dict) -> bool:
+                        if sub.date_from is not None:
+                            d = _parse_ticket_date(t["departure_at"])
+                            if not (sub.date_from <= d <= sub.date_to):
+                                return False
+                        if sub.max_stops is not None:
+                            stops = t.get("stops")
+                            if stops is not None and stops > sub.max_stops:
+                                return False
+                        return True
+
+                    sub_available = {
+                        t["destination_iata"] for t in tickets
+                        if _ticket_matches(t)
+                    }
                     destinations = [
                         d for d in destinations if d in sub_available
                     ]
@@ -194,13 +199,17 @@ async def monitor_cycle(bot: Bot) -> None:
                         deal = await analyzer.check(sub, origin, dest, session)
                         if deal is not None:
                             total_deals += 1
+                            savings_pct = round(
+                                (deal["target_price"] - deal["current_price"])
+                                / deal["target_price"] * 100
+                            ) if deal["target_price"] > 0 else 0
                             # Записать уведомление
                             await notif_repo.create(
                                 subscription_id=deal["subscription_id"],
                                 route_key=deal["route_key"],
                                 price=deal["current_price"],
-                                avg_price=deal["base_price"],
-                                discount_pct=deal["discount_pct"],
+                                avg_price=deal["target_price"],
+                                discount_pct=savings_pct,
                             )
                             # Отправить
                             await _send_notification(

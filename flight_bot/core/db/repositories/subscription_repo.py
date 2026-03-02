@@ -28,6 +28,8 @@ class SubscriptionRepository:
         dest_code: str,
         date_from: date | None = None,
         date_to: date | None = None,
+        max_stops: int | None = None,
+        target_price: int | None = None,
     ) -> Subscription:
         # Если подписка уже есть (в т.ч. неактивная) — реактивируем её
         stmt = select(Subscription).where(
@@ -46,6 +48,8 @@ class SubscriptionRepository:
             existing.is_active = True
             existing.date_from = date_from
             existing.date_to = date_to
+            existing.max_stops = max_stops
+            existing.target_price = target_price
             await self.session.commit()
             await self.session.refresh(existing)
             return existing
@@ -57,6 +61,8 @@ class SubscriptionRepository:
             dest_code=dest_code,
             date_from=date_from,
             date_to=date_to,
+            max_stops=max_stops,
+            target_price=target_price,
         )
         self.session.add(sub)
         await self.session.commit()

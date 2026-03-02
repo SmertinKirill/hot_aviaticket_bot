@@ -28,6 +28,7 @@ async def get_cheap_tickets(origin_iata: str) -> list[dict]:
         departure_at
         value
         trip_duration
+        number_of_changes
         ticket_link
       }
     }
@@ -55,6 +56,7 @@ async def get_cheap_tickets(origin_iata: str) -> list[dict]:
                         "destination_iata": dest,
                         "price": int(p.get("value", 0)),
                         "departure_at": (p.get("departure_at") or "")[:10],
+                        "stops": p.get("number_of_changes"),
                         "ticket_link": p.get("ticket_link", ""),
                     }
                 )

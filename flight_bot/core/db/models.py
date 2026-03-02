@@ -97,6 +97,8 @@ class Subscription(Base):
     dest_code: Mapped[str] = mapped_column(String, nullable=False)
     date_from: Mapped[date | None] = mapped_column(Date, nullable=True)
     date_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    max_stops: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    target_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now()

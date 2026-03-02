@@ -88,15 +88,14 @@ def subscription_list(
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def threshold_select(current: int) -> InlineKeyboardMarkup:
-    values = [20, 30, 40, 50]
-    buttons = []
-    for v in values:
-        label = f"{'✅ ' if v == current else ''}{v}%"
-        buttons.append(
-            InlineKeyboardButton(text=label, callback_data=f"threshold:{v}")
-        )
-    return InlineKeyboardMarkup(inline_keyboard=[buttons])
+def stops_select() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✈️ Только прямые", callback_data="stops:0")],
+            [InlineKeyboardButton(text="1️⃣ Макс. 1 пересадка", callback_data="stops:1")],
+            [InlineKeyboardButton(text="2️⃣ Макс. 2 пересадки", callback_data="stops:2")],
+        ]
+    )
 
 
 def date_type_select() -> InlineKeyboardMarkup:
