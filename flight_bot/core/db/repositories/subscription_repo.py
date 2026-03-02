@@ -69,6 +69,38 @@ class SubscriptionRepository:
         await self.session.refresh(sub)
         return sub
 
+    async def update(
+        self,
+        subscription_id: int,
+        user_id: int,
+        origin_iata: str,
+        dest_type: str,
+        dest_code: str,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        max_stops: int | None = None,
+        target_price: int | None = None,
+    ) -> bool:
+        stmt = (
+            update(Subscription)
+            .where(
+                Subscription.id == subscription_id,
+                Subscription.user_id == user_id,
+            )
+            .values(
+                origin_iata=origin_iata,
+                dest_type=dest_type,
+                dest_code=dest_code,
+                date_from=date_from,
+                date_to=date_to,
+                max_stops=max_stops,
+                target_price=target_price,
+            )
+        )
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+        return result.rowcount > 0
+
     async def deactivate(self, subscription_id: int, user_id: int) -> bool:
         stmt = (
             update(Subscription)

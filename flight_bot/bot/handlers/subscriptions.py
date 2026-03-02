@@ -438,24 +438,36 @@ async def _finalize_subscription(
     if not user:
         return
 
-    count = await sub_repo.count_active(user.id)
-    if count >= 10:
-        await _reply(
-            event,
-            "У вас уже 10 подписок — это максимум. "
-            "Удалите одну из существующих, чтобы добавить новую.",
-        )
-        return
+    editing_sub_id = data.get("editing_sub_id")
 
-    try:
-        await sub_repo.create(
-            user.id, origin_iata, dest_type, dest_code,
+    if editing_sub_id:
+        # Режим редактирования — обновляем существующую подписку
+        updated = await sub_repo.update(
+            editing_sub_id, user.id, origin_iata, dest_type, dest_code,
             date_from, date_to, max_stops, target_price,
         )
-    except IntegrityError:
-        await session.rollback()
-        await _reply(event, "Такая подписка у вас уже есть.")
-        return
+        action_label = "✅ Подписка обновлена!" if updated else "⚠️ Не удалось обновить подписку."
+    else:
+        # Режим создания — проверяем лимит и создаём
+        count = await sub_repo.count_active(user.id)
+        if count >= 10:
+            await _reply(
+                event,
+                "У вас уже 10 подписок — это максимум. "
+                "Удалите одну из существующих, чтобы добавить новую.",
+            )
+            return
+
+        try:
+            await sub_repo.create(
+                user.id, origin_iata, dest_type, dest_code,
+                date_from, date_to, max_stops, target_price,
+            )
+        except IntegrityError:
+            await session.rollback()
+            await _reply(event, "Такая подписка у вас уже есть.")
+            return
+        action_label = "✅ Подписка добавлена!"
 
     dest_label = await _dest_label(session, dest_type, dest_code)
     origin_name = await _city_name(session, origin_iata)
@@ -464,7 +476,7 @@ async def _finalize_subscription(
     price_str = f"{target_price:,} ₽".replace(",", " ")
     await _reply(
         event,
-        f"✅ Подписка добавлена!\n\n"
+        f"{action_label}\n\n"
         f"✈️ {origin_name} → {dest_label}\n"
         f"📅 {date_line}\n"
         f"🔄 {stops_line}\n"
@@ -526,6 +538,19 @@ async def _show_subscriptions(
         await event.message.edit_text(text, reply_markup=kb)
     else:
         await event.answer(text, reply_markup=kb)
+
+
+# --- Редактирование подписки ---
+
+@router.callback_query(F.data.startswith("edit_sub:"))
+async def cb_edit_subscription(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+):
+    sub_id = int(callback.data.split(":")[1])
+    await callback.answer()
+    await state.update_data(editing_sub_id=sub_id)
+    await callback.message.edit_text("Введите город вылета:")
+    await state.set_state(SubscribeStates.waiting_for_origin_city)
 
 
 # --- Удаление подписки ---
@@ -598,17 +623,18 @@ async def _get_reference_price(
     if not tickets:
         return None
 
-    # Фильтрация по датам для страны/региона
+    # Фильтрация по датам для страны/региона.
+    # get_cheap_tickets возвращает по одному (глобально дешёвому) билету на направление —
+    # его дата может не попасть в нужный диапазон. Если после фильтра пусто,
+    # используем нефильтрованные данные как приблизительный ориентир.
     if date_from or date_to:
-        filtered = []
-        for t in tickets:
-            dep = (t.get("departure_at") or "")[:10]
-            if date_from and dep < date_from:
-                continue
-            if date_to and dep > date_to:
-                continue
-            filtered.append(t)
-        tickets = filtered
+        filtered = [
+            t for t in tickets
+            if (not date_from or (t.get("departure_at") or "")[:10] >= date_from)
+            and (not date_to or (t.get("departure_at") or "")[:10] <= date_to)
+        ]
+        if filtered:
+            tickets = filtered
 
     if dest_type == "country":
         stmt = select(City.iata).where(City.country_code == dest_code)

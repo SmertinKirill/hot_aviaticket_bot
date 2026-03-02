@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime, timedelta
-from urllib.parse import urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,16 +12,41 @@ from core.db.repositories.price_history_repo import PriceHistoryRepository
 
 logger = logging.getLogger(__name__)
 
+_AVIASALES_BASE = "https://www.aviasales.ru"
 
-def _ensure_marker(ticket_link: str) -> str:
-    """Добавить маркер партнёрки если его нет."""
-    if not ticket_link:
-        return ticket_link
-    if "marker" in ticket_link:
-        return ticket_link
-    if "?" in ticket_link:
-        return f"{ticket_link}&marker={TRAVELPAYOUTS_MARKER}"
-    return f"{ticket_link}?marker={TRAVELPAYOUTS_MARKER}"
+
+def _build_ticket_url(ticket_link: str, route_key: str) -> str:
+    """Собрать ссылку в формате Aviasales: /search/MOW1503BKK1?t=...&marker=...
+
+    Открывает страницу поиска и автоматически показывает конкретный билет.
+    Если ticket_link недоступен — возвращает базовую поисковую ссылку.
+    """
+    # Пробуем взять параметры из ticket_link API
+    if ticket_link:
+        try:
+            parsed = urlparse(ticket_link)
+            # Путь: /MOW1703BKK1 → /search/MOW1703BKK1
+            path = parsed.path.lstrip("/")
+            search_path = f"/search/{path}"
+            # Параметры из ticket_link + marker
+            params = parse_qs(parsed.query, keep_blank_values=True)
+            params["marker"] = [TRAVELPAYOUTS_MARKER]
+            query = urlencode({k: v[0] for k, v in params.items()})
+            return f"{_AVIASALES_BASE}{search_path}?{query}"
+        except Exception:
+            pass
+
+    # Fallback: строим поисковую ссылку из route_key
+    try:
+        origin, dest, date_str = route_key.split(":")
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        date_part = dt.strftime("%d%m")
+        return (
+            f"{_AVIASALES_BASE}/search/{origin}{date_part}{dest}1"
+            f"?marker={TRAVELPAYOUTS_MARKER}"
+        )
+    except Exception:
+        return f"{_AVIASALES_BASE}/?marker={TRAVELPAYOUTS_MARKER}"
 
 
 async def check(
@@ -76,5 +101,5 @@ async def check(
         "dest_iata": dest_iata,
         "current_price": current_price,
         "target_price": target_price,
-        "ticket_link": _ensure_marker(ticket_link),
+        "ticket_link": _build_ticket_url(ticket_link, route_key),
     }

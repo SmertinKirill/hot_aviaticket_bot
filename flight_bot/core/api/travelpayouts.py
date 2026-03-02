@@ -51,6 +51,15 @@ async def get_cheap_tickets(origin_iata: str) -> list[dict]:
                 dest = p.get("destination_city_iata")
                 if not dest:
                     continue
+                # Пропускаем поезда: у них в ticket_link хэш начинается с R
+                # и содержит коды ж/д станций (ZKD, ZLK и т.д.)
+                link = p.get("ticket_link") or ""
+                link_hash = link.lstrip("/").split("?")[0]  # MOW1703LED1
+                t_param = ""
+                if "?t=" in link:
+                    t_param = link.split("?t=")[1].split("&")[0]
+                if t_param.startswith("R"):  # Railway
+                    continue
                 result.append(
                     {
                         "destination_iata": dest,
@@ -77,6 +86,82 @@ async def get_cheap_tickets(origin_iata: str) -> list[dict]:
         origin_iata,
     )
     return []
+
+
+async def get_route_tickets(
+    origin_iata: str,
+    destination_iata: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> list[dict]:
+    """Получить билеты для конкретного маршрута с фильтрацией по датам.
+
+    Возвращает список тикетов в том же формате что get_cheap_tickets.
+    Используется в scheduler для city-подписок с фильтром дат.
+    """
+    query = """
+    {
+      prices_one_way(
+        params: { origin: "%s", destination: "%s" }
+        grouping: DATES
+        paging: { offset: 0 limit: 200 }
+        sorting: VALUE_ASC
+      ) {
+        departure_at
+        value
+        number_of_changes
+        ticket_link
+      }
+    }
+    """ % (origin_iata, destination_iata)
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                GRAPHQL_URL,
+                json={"query": query},
+                headers={"X-Access-Token": TRAVELPAYOUTS_TOKEN},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        rows = data.get("data", {}).get("prices_one_way") or []
+
+        # Фильтруем только авиа
+        rows = [
+            r for r in rows
+            if r.get("transport_type") in (None, "avia", "airplane")
+        ]
+
+        if date_from or date_to:
+            rows = [
+                r for r in rows
+                if (not date_from or (r.get("departure_at") or "")[:10] >= date_from)
+                and (not date_to or (r.get("departure_at") or "")[:10] <= date_to)
+            ]
+
+        result = []
+        for r in rows:
+            if not r.get("value", 0):
+                continue
+            link = r.get("ticket_link") or ""
+            t_param = link.split("?t=")[1].split("&")[0] if "?t=" in link else ""
+            if t_param.startswith("R"):  # Railway — пропускаем
+                continue
+            result.append({
+                "destination_iata": destination_iata,
+                "price": int(r["value"]),
+                "departure_at": (r.get("departure_at") or "")[:10],
+                "stops": r.get("number_of_changes"),
+                "ticket_link": link,
+            })
+        return result
+
+    except Exception as e:
+        logger.error(
+            "get_route_tickets %s→%s: %s", origin_iata, destination_iata, e
+        )
+        return []
 
 
 async def get_global_min_price(

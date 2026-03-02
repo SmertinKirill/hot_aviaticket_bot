@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import analyzer
 from core.api import cache
-from core.api.travelpayouts import get_cheap_tickets
+from core.api.travelpayouts import get_cheap_tickets, get_route_tickets
 from core.db.base import async_session
 from core.db.models import Airport, City, Country, Subscription
 from core.db.repositories.notification_repo import NotificationRepository
@@ -84,8 +84,8 @@ async def _get_city_name(iata: str, session: AsyncSession) -> str:
 
 async def _send_notification(
     bot: Bot, telegram_id: int, deal: dict, session: AsyncSession
-) -> None:
-    """Отправить уведомление о горящем билете."""
+) -> bool:
+    """Отправить уведомление о горящем билете. Возвращает True при успехе."""
     origin_name = await _get_city_name(deal["origin_iata"], session)
     dest_name = await _get_city_name(deal["dest_iata"], session)
 
@@ -115,10 +115,12 @@ async def _send_notification(
 
     try:
         await bot.send_message(telegram_id, text, reply_markup=keyboard)
+        return True
     except Exception as e:
         logger.error(
             "Ошибка отправки уведомления user=%d: %s", telegram_id, e
         )
+        return False
 
 
 async def monitor_cycle(bot: Bot) -> None:
@@ -148,18 +150,31 @@ async def monitor_cycle(bot: Bot) -> None:
             total_deals = 0
 
             for origin, subs in origin_subs.items():
-                # Получить тикеты из кэша или API
+                # Получить общие тикеты из кэша или API
                 tickets = await cache.get_prices(origin)
                 if tickets is None:
                     tickets = await get_cheap_tickets(origin)
                     if tickets:
                         await cache.set_prices(origin, tickets)
 
-                # Множество доступных направлений
-                available_dest_iata = {t["destination_iata"] for t in tickets}
+                # Для city-подписок с фильтром дат — загружаем точные данные
+                # по конкретному маршруту (get_cheap_tickets даёт только 1 дату
+                # на направление, которая может не попасть в нужный период)
+                extra_tickets: list[dict] = []
+                for sub in subs:
+                    if sub.dest_type == "city" and sub.date_from is not None:
+                        route_t = await get_route_tickets(
+                            origin,
+                            sub.dest_code,
+                            sub.date_from.isoformat(),
+                            sub.date_to.isoformat(),
+                        )
+                        extra_tickets.extend(route_t)
+
+                all_tickets = tickets + extra_tickets
 
                 # Записать в price_history
-                for ticket in tickets:
+                for ticket in all_tickets:
                     dest = ticket["destination_iata"]
                     departure = ticket["departure_at"]
                     if not dest or not departure:
@@ -187,7 +202,7 @@ async def monitor_cycle(bot: Bot) -> None:
                         return True
 
                     sub_available = {
-                        t["destination_iata"] for t in tickets
+                        t["destination_iata"] for t in all_tickets
                         if _ticket_matches(t)
                     }
                     destinations = [
@@ -203,26 +218,26 @@ async def monitor_cycle(bot: Bot) -> None:
                                 (deal["target_price"] - deal["current_price"])
                                 / deal["target_price"] * 100
                             ) if deal["target_price"] > 0 else 0
-                            # Записать уведомление
-                            await notif_repo.create(
-                                subscription_id=deal["subscription_id"],
-                                route_key=deal["route_key"],
-                                price=deal["current_price"],
-                                avg_price=deal["target_price"],
-                                discount_pct=savings_pct,
-                            )
-                            # Отправить
-                            await _send_notification(
+                            # Отправить — записываем в БД только при успехе
+                            sent = await _send_notification(
                                 bot, sub.user.telegram_id, deal, session
                             )
+                            if sent:
+                                await notif_repo.create(
+                                    subscription_id=deal["subscription_id"],
+                                    route_key=deal["route_key"],
+                                    price=deal["current_price"],
+                                    avg_price=deal["target_price"],
+                                    discount_pct=savings_pct,
+                                )
                             logger.info(
                                 "Уведомление: user_id=%d, sub_id=%d, "
-                                "route=%s, price=%d, discount=%d%%",
+                                "route=%s, price=%d, savings=%d%%",
                                 sub.user.id,
                                 sub.id,
                                 deal["route_key"],
                                 deal["current_price"],
-                                deal["discount_pct"],
+                                savings_pct,
                             )
 
             logger.info(

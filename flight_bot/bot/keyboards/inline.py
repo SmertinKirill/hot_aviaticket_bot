@@ -69,19 +69,24 @@ def subscription_list(
     subs: list, dest_labels: dict[int, str]
 ) -> InlineKeyboardMarkup:
     """Список подписок с кнопкой удаления."""
-    type_emoji = {"region": "🌏", "country": "🏳", "city": "🏙"}
     buttons = []
     for i, sub in enumerate(subs, 1):
-        emoji = type_emoji.get(sub.dest_type, "")
         label = dest_labels.get(sub.id, sub.dest_code)
+        buttons.append(
+            [InlineKeyboardButton(
+                text=f"{i}. {label}",
+                callback_data=f"sub_info:{sub.id}",
+            )]
+        )
         buttons.append(
             [
                 InlineKeyboardButton(
-                    text=f"{i}. {emoji} {label}",
-                    callback_data=f"sub_info:{sub.id}",
+                    text="✏️ Изменить",
+                    callback_data=f"edit_sub:{sub.id}",
                 ),
                 InlineKeyboardButton(
-                    text="❌", callback_data=f"unsub:{sub.id}"
+                    text="❌ Удалить",
+                    callback_data=f"unsub:{sub.id}",
                 ),
             ]
         )
