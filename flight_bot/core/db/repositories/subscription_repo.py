@@ -1,0 +1,59 @@
+from sqlalchemy import func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
+
+from core.db.models import Subscription, User
+
+
+class SubscriptionRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_user_subscriptions(self, user_id: int) -> list[Subscription]:
+        stmt = (
+            select(Subscription)
+            .where(Subscription.user_id == user_id, Subscription.is_active.is_(True))
+            .order_by(Subscription.created_at)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def create(
+        self, user_id: int, dest_type: str, dest_code: str
+    ) -> Subscription:
+        sub = Subscription(
+            user_id=user_id, dest_type=dest_type, dest_code=dest_code
+        )
+        self.session.add(sub)
+        await self.session.commit()
+        await self.session.refresh(sub)
+        return sub
+
+    async def deactivate(self, subscription_id: int, user_id: int) -> bool:
+        stmt = (
+            update(Subscription)
+            .where(
+                Subscription.id == subscription_id,
+                Subscription.user_id == user_id,
+            )
+            .values(is_active=False)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+        return result.rowcount > 0
+
+    async def count_active(self, user_id: int) -> int:
+        stmt = select(func.count()).where(
+            Subscription.user_id == user_id, Subscription.is_active.is_(True)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one()
+
+    async def get_all_active(self) -> list[Subscription]:
+        stmt = (
+            select(Subscription)
+            .where(Subscription.is_active.is_(True))
+            .options(joinedload(Subscription.user))
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().unique().all())

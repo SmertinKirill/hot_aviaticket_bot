@@ -1,0 +1,48 @@
+"""Точка входа Telegram-бота (long polling)."""
+
+import asyncio
+import logging
+
+from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.memory import MemoryStorage
+
+from bot.handlers import settings, start, subscriptions
+from bot.middleware import DbSessionMiddleware
+from bootstrap.load_references import load_if_empty
+from core.config import TELEGRAM_TOKEN
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+
+async def main() -> None:
+    logger.info("Bot: запуск")
+
+    # Загрузить справочники если пусто
+    await load_if_empty()
+
+    bot = Bot(token=TELEGRAM_TOKEN)
+    dp = Dispatcher(storage=MemoryStorage())
+
+    # Middleware для сессий БД
+    dp.message.middleware(DbSessionMiddleware())
+    dp.callback_query.middleware(DbSessionMiddleware())
+
+    # Роутеры
+    dp.include_router(start.router)
+    dp.include_router(subscriptions.router)
+    dp.include_router(settings.router)
+
+    logger.info("Bot: начинаем polling")
+    try:
+        await dp.start_polling(bot)
+    finally:
+        logger.info("Bot: остановлен")
+        await bot.session.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
