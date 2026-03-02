@@ -21,6 +21,25 @@ class SubscriptionRepository:
     async def create(
         self, user_id: int, origin_iata: str, dest_type: str, dest_code: str
     ) -> Subscription:
+        # Если подписка уже есть (в т.ч. неактивная) — реактивируем её
+        stmt = select(Subscription).where(
+            Subscription.user_id == user_id,
+            Subscription.origin_iata == origin_iata,
+            Subscription.dest_type == dest_type,
+            Subscription.dest_code == dest_code,
+        )
+        result = await self.session.execute(stmt)
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            if existing.is_active:
+                from sqlalchemy.exc import IntegrityError
+                raise IntegrityError(None, None, Exception("duplicate active subscription"))
+            existing.is_active = True
+            await self.session.commit()
+            await self.session.refresh(existing)
+            return existing
+
         sub = Subscription(
             user_id=user_id, origin_iata=origin_iata, dest_type=dest_type, dest_code=dest_code
         )

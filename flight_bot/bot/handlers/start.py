@@ -39,8 +39,23 @@ async def cmd_start(message: Message, session: AsyncSession):
     )
 
 
+# Алиасы: популярные названия, которые пользователи вводят, но которые
+# не совпадают точно с названием города в базе.
+CITY_ALIASES: dict[str, str] = {
+    "бали": "DPS",
+}
+
+
 async def search_cities(session: AsyncSession, query: str) -> list[City]:
     """Поиск городов по названию города и названиям аэропортов."""
+    alias_iata = CITY_ALIASES.get(query.strip().lower())
+    if alias_iata:
+        stmt = select(City).where(City.iata == alias_iata)
+        result = await session.execute(stmt)
+        city = result.scalar_one_or_none()
+        if city:
+            return [city]
+
     stmt = select(City).where(
         (City.name_ru.ilike(f"%{query}%")) | (City.name_en.ilike(f"%{query}%"))
     )

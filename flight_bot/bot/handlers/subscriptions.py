@@ -177,7 +177,7 @@ async def process_country_input(
         await _create_subscription_msg(message, session, origin_iata, "country", c.code)
         return
 
-    if len(countries) <= 5:
+    if len(countries) <= 8:
         kb = country_select([(c.code, c.name_ru) for c in countries])
         for row in kb.inline_keyboard:
             for btn in row:
@@ -242,7 +242,7 @@ async def process_city_input(
         await _create_subscription_msg(message, session, origin_iata, "city", c.iata)
         return
 
-    if len(cities) <= 5:
+    if len(cities) <= 8:
         kb = city_select([(c.iata, c.name_ru) for c in cities])
         for row in kb.inline_keyboard:
             for btn in row:
