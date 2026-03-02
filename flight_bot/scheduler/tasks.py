@@ -1,7 +1,7 @@
 """Задачи мониторинга цен и отправки уведомлений."""
 
 import logging
-from datetime import datetime
+from datetime import date, datetime
 
 from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -175,9 +175,18 @@ async def monitor_cycle(bot: Bot) -> None:
                 # Проверить подписки
                 for sub in subs:
                     destinations = await resolve_destinations(sub, session)
-                    # Фильтрация по реальным направлениям
+                    # Фильтрация тикетов по дате подписки
+                    if sub.date_from is not None:
+                        sub_available = {
+                            t["destination_iata"] for t in tickets
+                            if sub.date_from
+                            <= _parse_ticket_date(t["departure_at"])
+                            <= sub.date_to
+                        }
+                    else:
+                        sub_available = available_dest_iata
                     destinations = [
-                        d for d in destinations if d in available_dest_iata
+                        d for d in destinations if d in sub_available
                     ]
 
                     for dest in destinations:
@@ -216,6 +225,14 @@ async def monitor_cycle(bot: Bot) -> None:
 
     except Exception as e:
         logger.error("Ошибка цикла мониторинга: %s", e)
+
+
+def _parse_ticket_date(departure_at: str) -> date:
+    """Парсим YYYY-MM-DD из поля departure_at тикета."""
+    try:
+        return datetime.strptime(departure_at[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return date.min
 
 
 async def clean_old_prices() -> None:

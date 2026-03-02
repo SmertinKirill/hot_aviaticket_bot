@@ -40,7 +40,11 @@ async def check(
     notif_repo = NotificationRepository(session)
 
     prefix = f"{origin_iata}:{dest_iata}:"
-    latest = await price_repo.get_latest_by_prefix(prefix)
+    latest = await price_repo.get_latest_by_prefix(
+        prefix,
+        date_from=subscription.date_from,
+        date_to=subscription.date_to,
+    )
 
     if latest is None:
         return None

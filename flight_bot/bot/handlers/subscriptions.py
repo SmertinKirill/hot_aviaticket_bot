@@ -1,6 +1,8 @@
 """Хендлеры подписок: /subscribe, /mysubscriptions, /unsubscribe."""
 
 import logging
+from calendar import monthrange
+from datetime import date, datetime
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -14,6 +16,8 @@ from bot.handlers.start import search_cities
 from bot.keyboards.inline import (
     city_select,
     country_select,
+    date_type_select,
+    month_select,
     region_select,
     subscribe_type,
     subscription_list,
@@ -26,10 +30,15 @@ from core.db.repositories.user_repo import UserRepository
 router = Router()
 logger = logging.getLogger(__name__)
 
-REGIONS = {
-    "ЮВА": "ЮВА",
-    "Европа": "Европа",
-    "ОАЭ и Ближний Восток": "ОАЭ и Ближний Восток",
+MONTHS_GEN = {
+    1: "января", 2: "февраля", 3: "марта", 4: "апреля",
+    5: "мая", 6: "июня", 7: "июля", 8: "августа",
+    9: "сентября", 10: "октября", 11: "ноября", 12: "декабря",
+}
+MONTHS_NOM = {
+    1: "январь", 2: "февраль", 3: "март", 4: "апрель",
+    5: "май", 6: "июнь", 7: "июль", 8: "август",
+    9: "сентябрь", 10: "октябрь", 11: "ноябрь", 12: "декабрь",
 }
 
 
@@ -137,7 +146,10 @@ async def cb_region_select(
         )
         return
 
-    await _create_subscription(callback, state, session, origin_iata, "region", region)
+    await state.update_data(pending_dest_type="region", pending_dest_code=region)
+    await callback.message.edit_text(
+        "Выберите период вылета:", reply_markup=date_type_select()
+    )
 
 
 # --- Страна ---
@@ -168,13 +180,15 @@ async def process_country_input(
     if len(countries) == 1:
         c = countries[0]
         data = await state.get_data()
-        origin_iata = data.get("origin_iata")
-        if not origin_iata:
+        if not data.get("origin_iata"):
             await message.answer("Сессия истекла. Начните заново с /subscribe")
             await state.clear()
             return
-        await state.clear()
-        await _create_subscription_msg(message, session, origin_iata, "country", c.code)
+        await state.update_data(pending_dest_type="country", pending_dest_code=c.code)
+        await state.set_state(None)
+        await message.answer(
+            "Выберите период вылета:", reply_markup=date_type_select()
+        )
         return
 
     if len(countries) <= 8:
@@ -200,14 +214,16 @@ async def cb_country_pick(
     await callback.answer()
 
     data = await state.get_data()
-    origin_iata = data.get("origin_iata")
-    if not origin_iata:
+    if not data.get("origin_iata"):
         await callback.message.edit_text(
             "Сессия истекла. Начните заново с /subscribe"
         )
         return
 
-    await _create_subscription(callback, state, session, origin_iata, "country", code)
+    await state.update_data(pending_dest_type="country", pending_dest_code=code)
+    await callback.message.edit_text(
+        "Выберите период вылета:", reply_markup=date_type_select()
+    )
 
 
 # --- Город ---
@@ -233,13 +249,15 @@ async def process_city_input(
     if len(cities) == 1:
         c = cities[0]
         data = await state.get_data()
-        origin_iata = data.get("origin_iata")
-        if not origin_iata:
+        if not data.get("origin_iata"):
             await message.answer("Сессия истекла. Начните заново с /subscribe")
             await state.clear()
             return
-        await state.clear()
-        await _create_subscription_msg(message, session, origin_iata, "city", c.iata)
+        await state.update_data(pending_dest_type="city", pending_dest_code=c.iata)
+        await state.set_state(None)
+        await message.answer(
+            "Выберите период вылета:", reply_markup=date_type_select()
+        )
         return
 
     if len(cities) <= 8:
@@ -265,92 +283,162 @@ async def cb_city_pick(
     await callback.answer()
 
     data = await state.get_data()
-    origin_iata = data.get("origin_iata")
-    if not origin_iata:
+    if not data.get("origin_iata"):
         await callback.message.edit_text(
             "Сессия истекла. Начните заново с /subscribe"
         )
         return
 
-    await _create_subscription(callback, state, session, origin_iata, "city", iata)
+    await state.update_data(pending_dest_type="city", pending_dest_code=iata)
+    await callback.message.edit_text(
+        "Выберите период вылета:", reply_markup=date_type_select()
+    )
+
+
+# --- Выбор даты ---
+
+@router.callback_query(F.data.startswith("date_type:"))
+async def cb_date_type(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+):
+    dtype = callback.data.split(":")[1]
+    await callback.answer()
+
+    if dtype == "any":
+        await _finalize_subscription(callback, state, session)
+        return
+
+    if dtype == "month":
+        await callback.message.edit_text(
+            "Выберите месяц:", reply_markup=month_select()
+        )
+        return
+
+    if dtype == "specific":
+        await state.update_data(date_input_type="specific")
+        await state.set_state(SubscribeStates.waiting_for_date_input)
+        await callback.message.edit_text(
+            "Введите дату в формате ДД.ММ.ГГГГ:\n(например: 15.04.2026)"
+        )
+        return
+
+    if dtype == "range":
+        await state.update_data(date_input_type="range")
+        await state.set_state(SubscribeStates.waiting_for_date_input)
+        await callback.message.edit_text(
+            "Введите диапазон в формате ДД.ММ.ГГГГ - ДД.ММ.ГГГГ:\n"
+            "(например: 01.04.2026 - 30.04.2026)"
+        )
+        return
+
+
+@router.callback_query(F.data.startswith("date_month:"))
+async def cb_date_month(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+):
+    year_month = callback.data.split(":")[1]  # "2026-03"
+    year, month = map(int, year_month.split("-"))
+    last_day = monthrange(year, month)[1]
+    date_from = date(year, month, 1)
+    date_to = date(year, month, last_day)
+
+    await callback.answer()
+    await _finalize_subscription(callback, state, session, date_from, date_to)
+
+
+@router.message(SubscribeStates.waiting_for_date_input)
+async def process_date_input(
+    message: Message, state: FSMContext, session: AsyncSession
+):
+    data = await state.get_data()
+    date_input_type = data.get("date_input_type")
+    text = message.text.strip()
+
+    if date_input_type == "specific":
+        d = _parse_single_date(text)
+        if not d:
+            await message.answer(
+                "Неверный формат. Введите дату в формате ДД.ММ.ГГГГ:"
+            )
+            return
+        if d < date.today():
+            await message.answer(
+                "Дата уже прошла. Введите дату в будущем:"
+            )
+            return
+        date_from = date_to = d
+    else:  # range
+        result = _parse_date_range(text)
+        if not result:
+            await message.answer(
+                "Неверный формат. Введите диапазон в формате ДД.ММ.ГГГГ - ДД.ММ.ГГГГ:"
+            )
+            return
+        date_from, date_to = result
+        if date_to < date.today():
+            await message.answer(
+                "Диапазон уже прошёл. Введите актуальные даты:"
+            )
+            return
+
+    await _finalize_subscription(message, state, session, date_from, date_to)
 
 
 # --- Создание подписки ---
 
-async def _create_subscription(
-    callback: CallbackQuery,
+async def _finalize_subscription(
+    event: Message | CallbackQuery,
     state: FSMContext,
     session: AsyncSession,
-    origin_iata: str,
-    dest_type: str,
-    dest_code: str,
-):
-    user_repo = UserRepository(session)
-    sub_repo = SubscriptionRepository(session)
-
-    user = await user_repo.get_by_telegram_id(callback.from_user.id)
-    if not user:
-        return
-
-    count = await sub_repo.count_active(user.id)
-    if count >= 10:
-        await state.clear()
-        await callback.message.edit_text(
-            "У вас уже 10 подписок — это максимум. "
-            "Удалите одну из существующих, чтобы добавить новую."
-        )
-        return
-
-    try:
-        await sub_repo.create(user.id, origin_iata, dest_type, dest_code)
-    except IntegrityError:
-        await session.rollback()
-        await state.clear()
-        await callback.message.edit_text(
-            "Такая подписка у вас уже есть."
-        )
-        return
-
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> None:
+    """Создать подписку из данных FSM + выбранной даты."""
+    data = await state.get_data()
+    origin_iata = data.get("origin_iata")
+    dest_type = data.get("pending_dest_type")
+    dest_code = data.get("pending_dest_code")
     await state.clear()
-    label = await _dest_label(session, dest_type, dest_code)
-    origin_name = await _city_name(session, origin_iata)
-    await callback.message.edit_text(
-        f"✅ Подписка добавлена: {origin_name} → {label}"
-    )
 
+    if not origin_iata or not dest_type or not dest_code:
+        await _reply(event, "Сессия истекла. Начните заново с /subscribe")
+        return
 
-async def _create_subscription_msg(
-    message: Message,
-    session: AsyncSession,
-    origin_iata: str,
-    dest_type: str,
-    dest_code: str,
-):
     user_repo = UserRepository(session)
     sub_repo = SubscriptionRepository(session)
 
-    user = await user_repo.get_by_telegram_id(message.from_user.id)
+    tg_id = event.from_user.id
+    user = await user_repo.get_by_telegram_id(tg_id)
     if not user:
         return
 
     count = await sub_repo.count_active(user.id)
     if count >= 10:
-        await message.answer(
+        await _reply(
+            event,
             "У вас уже 10 подписок — это максимум. "
-            "Удалите одну из существующих, чтобы добавить новую."
+            "Удалите одну из существующих, чтобы добавить новую.",
         )
         return
 
     try:
-        await sub_repo.create(user.id, origin_iata, dest_type, dest_code)
+        await sub_repo.create(user.id, origin_iata, dest_type, dest_code, date_from, date_to)
     except IntegrityError:
         await session.rollback()
-        await message.answer("Такая подписка у вас уже есть.")
+        await _reply(event, "Такая подписка у вас уже есть.")
         return
 
-    label = await _dest_label(session, dest_type, dest_code)
+    dest_label = await _dest_label(session, dest_type, dest_code)
     origin_name = await _city_name(session, origin_iata)
-    await message.answer(f"✅ Подписка добавлена: {origin_name} → {label}")
+    date_str = _date_label(date_from, date_to)
+    await _reply(event, f"✅ Подписка добавлена: {origin_name} → {dest_label}{date_str}")
+
+
+async def _reply(event: Message | CallbackQuery, text: str) -> None:
+    if isinstance(event, CallbackQuery):
+        await event.message.edit_text(text)
+    else:
+        await event.answer(text)
 
 
 # --- Список подписок ---
@@ -397,7 +485,8 @@ async def _show_subscriptions(
     for sub in subs:
         dest_label = await _dest_label(session, sub.dest_type, sub.dest_code)
         origin_name = await _city_name(session, sub.origin_iata)
-        dest_labels[sub.id] = f"{origin_name} → {dest_label}"
+        date_str = _date_label(sub.date_from, sub.date_to)
+        dest_labels[sub.id] = f"{origin_name} → {dest_label}{date_str}"
 
     text = f"Твои подписки ({count}/10):"
     kb = subscription_list(subs, dest_labels)
@@ -437,7 +526,6 @@ async def cb_unsub(callback: CallbackQuery, session: AsyncSession):
 # --- Хелперы ---
 
 async def _city_name(session: AsyncSession, iata: str) -> str:
-    """Русское название города по IATA."""
     stmt = select(City.name_ru).where(City.iata == iata)
     result = await session.execute(stmt)
     return result.scalar_one_or_none() or iata
@@ -446,7 +534,6 @@ async def _city_name(session: AsyncSession, iata: str) -> str:
 async def _dest_label(
     session: AsyncSession, dest_type: str, dest_code: str
 ) -> str:
-    """Человекочитаемое название направления."""
     if dest_type == "region":
         return dest_code
 
@@ -463,3 +550,39 @@ async def _dest_label(
         return f"{name or dest_code} ({dest_code})"
 
     return dest_code
+
+
+def _date_label(date_from: date | None, date_to: date | None) -> str:
+    if not date_from:
+        return ""
+    if date_from == date_to:
+        return f" · {date_from.day} {MONTHS_GEN[date_from.month]} {date_from.year}"
+    last_day = monthrange(date_from.year, date_from.month)[1]
+    if (
+        date_from.day == 1
+        and date_to.month == date_from.month
+        and date_to.year == date_from.year
+        and date_to.day == last_day
+    ):
+        return f" · {MONTHS_NOM[date_from.month]} {date_from.year}"
+    return f" · {date_from.strftime('%d.%m')}–{date_to.strftime('%d.%m.%Y')}"
+
+
+def _parse_single_date(s: str) -> date | None:
+    for fmt in ["%d.%m.%Y", "%d/%m/%Y"]:
+        try:
+            return datetime.strptime(s.strip(), fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _parse_date_range(text: str) -> tuple[date, date] | None:
+    for sep in [" - ", " – ", " — "]:
+        if sep in text:
+            parts = text.split(sep, 1)
+            d1 = _parse_single_date(parts[0])
+            d2 = _parse_single_date(parts[1])
+            if d1 and d2:
+                return (min(d1, d2), max(d1, d2))
+    return None

@@ -1,9 +1,10 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -94,6 +95,8 @@ class Subscription(Base):
     origin_iata: Mapped[str] = mapped_column(String, ForeignKey("cities.iata"), nullable=False)
     dest_type: Mapped[str] = mapped_column(String, nullable=False)
     dest_code: Mapped[str] = mapped_column(String, nullable=False)
+    date_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    date_to: Mapped[date | None] = mapped_column(Date, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now()

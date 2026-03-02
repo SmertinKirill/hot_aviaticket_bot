@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,14 +31,23 @@ class PriceHistoryRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_latest_by_prefix(self, prefix: str) -> PriceHistory | None:
-        """Получить последнюю запись где route_key начинается с prefix."""
-        stmt = (
-            select(PriceHistory)
-            .where(PriceHistory.route_key.like(f"{prefix}%"))
-            .order_by(PriceHistory.found_at.desc())
-            .limit(1)
-        )
+    async def get_latest_by_prefix(
+        self,
+        prefix: str,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> PriceHistory | None:
+        """Получить последнюю запись где route_key начинается с prefix.
+
+        route_key формат: ORIGIN:DEST:YYYY-MM-DD — ISO-даты сортируются лексикографически,
+        поэтому фильтрация строковым сравнением работает корректно.
+        """
+        stmt = select(PriceHistory).where(PriceHistory.route_key.like(f"{prefix}%"))
+        if date_from:
+            stmt = stmt.where(PriceHistory.route_key >= f"{prefix}{date_from.isoformat()}")
+        if date_to:
+            stmt = stmt.where(PriceHistory.route_key <= f"{prefix}{date_to.isoformat()}z")
+        stmt = stmt.order_by(PriceHistory.found_at.desc()).limit(1)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 

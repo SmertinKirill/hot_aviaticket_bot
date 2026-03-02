@@ -1,4 +1,13 @@
+from datetime import date
+from calendar import monthrange
+
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+_MONTHS_NOM = {
+    1: "Январь", 2: "Февраль", 3: "Март", 4: "Апрель",
+    5: "Май", 6: "Июнь", 7: "Июль", 8: "Август",
+    9: "Сентябрь", 10: "Октябрь", 11: "Ноябрь", 12: "Декабрь",
+}
 
 
 def main_menu() -> InlineKeyboardMarkup:
@@ -88,6 +97,39 @@ def threshold_select(current: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text=label, callback_data=f"threshold:{v}")
         )
     return InlineKeyboardMarkup(inline_keyboard=[buttons])
+
+
+def date_type_select() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📅 Конкретная дата", callback_data="date_type:specific"),
+                InlineKeyboardButton(text="📆 Диапазон дат", callback_data="date_type:range"),
+            ],
+            [
+                InlineKeyboardButton(text="🗓 Месяц", callback_data="date_type:month"),
+                InlineKeyboardButton(text="⏩ Любая дата", callback_data="date_type:any"),
+            ],
+        ]
+    )
+
+
+def month_select() -> InlineKeyboardMarkup:
+    today = date.today()
+    buttons = []
+    row = []
+    for i in range(12):
+        total_month = today.month - 1 + i
+        m = total_month % 12 + 1
+        y = today.year + total_month // 12
+        label = f"{_MONTHS_NOM[m]} {y}"
+        row.append(InlineKeyboardButton(text=label, callback_data=f"date_month:{y}-{m:02d}"))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def add_first_subscription() -> InlineKeyboardMarkup:

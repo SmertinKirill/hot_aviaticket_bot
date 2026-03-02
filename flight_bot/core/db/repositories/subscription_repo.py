@@ -1,3 +1,5 @@
+from datetime import date
+
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -19,7 +21,13 @@ class SubscriptionRepository:
         return list(result.scalars().all())
 
     async def create(
-        self, user_id: int, origin_iata: str, dest_type: str, dest_code: str
+        self,
+        user_id: int,
+        origin_iata: str,
+        dest_type: str,
+        dest_code: str,
+        date_from: date | None = None,
+        date_to: date | None = None,
     ) -> Subscription:
         # Если подписка уже есть (в т.ч. неактивная) — реактивируем её
         stmt = select(Subscription).where(
@@ -36,12 +44,19 @@ class SubscriptionRepository:
                 from sqlalchemy.exc import IntegrityError
                 raise IntegrityError(None, None, Exception("duplicate active subscription"))
             existing.is_active = True
+            existing.date_from = date_from
+            existing.date_to = date_to
             await self.session.commit()
             await self.session.refresh(existing)
             return existing
 
         sub = Subscription(
-            user_id=user_id, origin_iata=origin_iata, dest_type=dest_type, dest_code=dest_code
+            user_id=user_id,
+            origin_iata=origin_iata,
+            dest_type=dest_type,
+            dest_code=dest_code,
+            date_from=date_from,
+            date_to=date_to,
         )
         self.session.add(sub)
         await self.session.commit()
