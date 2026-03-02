@@ -24,6 +24,7 @@ from bot.keyboards.inline import (
     subscription_list,
 )
 from bot.states import SubscribeStates
+from core.api.travelpayouts import get_cheap_tickets, get_global_min_price
 from core.db.models import City, Country
 from core.db.repositories.subscription_repo import SubscriptionRepository
 from core.db.repositories.user_repo import UserRepository
@@ -77,7 +78,7 @@ async def cb_subscribe(callback: CallbackQuery, state: FSMContext, session: Asyn
     await state.set_state(SubscribeStates.waiting_for_origin_city)
 
 
-@router.message(SubscribeStates.waiting_for_origin_city)
+@router.message(SubscribeStates.waiting_for_origin_city, ~F.text.startswith("/"))
 async def process_origin_city_input(
     message: Message, state: FSMContext, session: AsyncSession
 ):
@@ -157,7 +158,7 @@ async def cb_sub_country(callback: CallbackQuery, state: FSMContext):
     await state.set_state(SubscribeStates.waiting_for_country_input)
 
 
-@router.message(SubscribeStates.waiting_for_country_input)
+@router.message(SubscribeStates.waiting_for_country_input, ~F.text.startswith("/"))
 async def process_country_input(
     message: Message, state: FSMContext, session: AsyncSession
 ):
@@ -219,7 +220,7 @@ async def cb_sub_city(callback: CallbackQuery, state: FSMContext):
     await state.set_state(SubscribeStates.waiting_for_city_input)
 
 
-@router.message(SubscribeStates.waiting_for_city_input)
+@router.message(SubscribeStates.waiting_for_city_input, ~F.text.startswith("/"))
 async def process_city_input(
     message: Message, state: FSMContext, session: AsyncSession
 ):
@@ -320,7 +321,7 @@ async def cb_date_month(callback: CallbackQuery, state: FSMContext):
     )
 
 
-@router.message(SubscribeStates.waiting_for_date_input)
+@router.message(SubscribeStates.waiting_for_date_input, ~F.text.startswith("/"))
 async def process_date_input(message: Message, state: FSMContext):
     data = await state.get_data()
     text = message.text.strip()
@@ -365,36 +366,29 @@ async def cb_stops_select(
     origin_iata = data.get("origin_iata")
     dest_type = data.get("pending_dest_type")
     dest_code = data.get("pending_dest_code")
-    date_from = date.fromisoformat(data["date_from"]) if data.get("date_from") else None
-    date_to = date.fromisoformat(data["date_to"]) if data.get("date_to") else None
+    date_from = data.get("date_from")  # ISO строка или None
+    date_to = data.get("date_to")      # ISO строка или None
 
     # Показываем "загрузка" пока получаем цены
     await callback.message.edit_text("⏳ Загружаем данные о ценах...")
 
-    ref_price = await _get_reference_price(origin_iata, dest_type, dest_code, session)
-
-    origin_name = await _city_name(session, origin_iata)
-    dest_label = await _dest_label(session, dest_type, dest_code)
-    date_line = _date_label(date_from, date_to).strip(" ·") or "любые даты"
-    stops_line = STOPS_LABELS.get(max_stops, "")
+    ref_price = await _get_reference_price(
+        origin_iata, dest_type, dest_code, session, date_from, date_to
+    )
     price_line = (
         f"~{ref_price:,} ₽".replace(",", " ") if ref_price else "нет данных"
     )
 
     text = (
-        f"📋 Новая подписка\n\n"
-        f"✈️ {origin_name} → {dest_label}\n"
-        f"📅 {date_line}\n"
-        f"🔄 {stops_line}\n"
-        f"💰 Сейчас от: {price_line}\n\n"
-        f"Введите максимальную цену для уведомления (₽):\n"
-        f"(например: 30000)"
+        f"Сколько максимум вы готовы потратить на билет? (₽):\n"
+        f"(например: 30000)\n\n"
+        f"💰 Сейчас минимальная цена: {price_line}"
     )
     await state.set_state(SubscribeStates.waiting_for_target_price)
     await callback.message.edit_text(text)
 
 
-@router.message(SubscribeStates.waiting_for_target_price)
+@router.message(SubscribeStates.waiting_for_target_price, ~F.text.startswith("/"))
 async def process_target_price(
     message: Message, state: FSMContext, session: AsyncSession
 ):
@@ -465,14 +459,16 @@ async def _finalize_subscription(
 
     dest_label = await _dest_label(session, dest_type, dest_code)
     origin_name = await _city_name(session, origin_iata)
-    date_str = _date_label(date_from, date_to)
-    stops_str = f" · {STOPS_LABELS[max_stops]}" if max_stops is not None else ""
+    date_line = _date_label(date_from, date_to).strip(" ·") or "любые даты"
+    stops_line = STOPS_LABELS.get(max_stops, "") if max_stops is not None else "любые"
     price_str = f"{target_price:,} ₽".replace(",", " ")
     await _reply(
         event,
         f"✅ Подписка добавлена!\n\n"
-        f"{origin_name} → {dest_label}{date_str}{stops_str}\n"
-        f"Порог уведомления: до {price_str}",
+        f"✈️ {origin_name} → {dest_label}\n"
+        f"📅 {date_line}\n"
+        f"🔄 {stops_line}\n"
+        f"💰 Уведомлять при цене ниже: {price_str}",
     )
 
 
@@ -578,10 +574,23 @@ async def _dest_label(session: AsyncSession, dest_type: str, dest_code: str) -> 
 
 
 async def _get_reference_price(
-    origin_iata: str, dest_type: str, dest_code: str, session: AsyncSession
+    origin_iata: str,
+    dest_type: str,
+    dest_code: str,
+    session: AsyncSession,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ) -> int | None:
-    """Получить приблизительную текущую минимальную цену для направления."""
-    from core.api.travelpayouts import get_cheap_tickets
+    """Получить минимальную цену для направления с учётом дат."""
+    # Для конкретного города — прямой запрос по маршруту с фильтром дат
+    if dest_type == "city":
+        try:
+            return await get_global_min_price(
+                origin_iata, dest_code, date_from, date_to
+            )
+        except Exception:
+            return None
+
     try:
         tickets = await get_cheap_tickets(origin_iata)
     except Exception:
@@ -589,9 +598,19 @@ async def _get_reference_price(
     if not tickets:
         return None
 
-    if dest_type == "city":
-        matching = [t for t in tickets if t["destination_iata"] == dest_code]
-    elif dest_type == "country":
+    # Фильтрация по датам для страны/региона
+    if date_from or date_to:
+        filtered = []
+        for t in tickets:
+            dep = (t.get("departure_at") or "")[:10]
+            if date_from and dep < date_from:
+                continue
+            if date_to and dep > date_to:
+                continue
+            filtered.append(t)
+        tickets = filtered
+
+    if dest_type == "country":
         stmt = select(City.iata).where(City.country_code == dest_code)
         result = await session.execute(stmt)
         city_iatas = {row[0] for row in result.all()}
@@ -635,7 +654,7 @@ def _parse_single_date(s: str) -> date | None:
 
 
 def _parse_date_range(text: str) -> tuple[date, date] | None:
-    for sep in [" - ", " – ", " — "]:
+    for sep in [" - ", " – ", " — ", "-", "–", "—"]:
         if sep in text:
             parts = text.split(sep, 1)
             d1 = _parse_single_date(parts[0])

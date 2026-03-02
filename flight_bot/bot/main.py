@@ -5,6 +5,7 @@ import logging
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import BotCommand, MenuButtonCommands
 
 from bot.handlers import settings, start, subscriptions
 from bot.middleware import DbSessionMiddleware
@@ -35,6 +36,14 @@ async def main() -> None:
     dp.include_router(start.router)
     dp.include_router(subscriptions.router)
     dp.include_router(settings.router)
+
+    # Регистрируем команды (показываются в меню "/" и кнопке слева)
+    await bot.set_my_commands([
+        BotCommand(command="subscribe", description="Добавить подписку"),
+        BotCommand(command="mysubscriptions", description="Мои подписки"),
+        BotCommand(command="start", description="Главное меню"),
+    ])
+    await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
 
     logger.info("Bot: начинаем polling")
     try:
