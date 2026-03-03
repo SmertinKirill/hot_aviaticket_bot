@@ -7,7 +7,10 @@ from datetime import date, datetime
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import (
+    CallbackQuery, KeyboardButton, Message,
+    ReplyKeyboardMarkup, ReplyKeyboardRemove,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
@@ -58,6 +61,20 @@ _REGIONS = {
 }
 
 
+_POPULAR_ORIGINS = [
+    "Москва", "Санкт-Петербург", "Казань",
+    "Новосибирск", "Сочи", "Красноярск",
+]
+
+
+def _origin_reply_kb() -> ReplyKeyboardMarkup:
+    buttons = [
+        [KeyboardButton(text=city) for city in _POPULAR_ORIGINS[:3]],
+        [KeyboardButton(text=city) for city in _POPULAR_ORIGINS[3:]],
+    ]
+    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True, one_time_keyboard=True)
+
+
 # --- Начало: выбор города вылета ---
 
 @router.message(Command("subscribe"))
@@ -67,7 +84,10 @@ async def cmd_subscribe(message: Message, state: FSMContext, session: AsyncSessi
     if not user:
         await message.answer("Сначала выполните /start")
         return
-    await message.answer("Введите город вылета:")
+    await message.answer(
+        "Введите полное название города вылета на русском:",
+        reply_markup=_origin_reply_kb(),
+    )
     await state.set_state(SubscribeStates.waiting_for_origin_city)
 
 
@@ -79,7 +99,11 @@ async def cb_subscribe(callback: CallbackQuery, state: FSMContext, session: Asyn
         await callback.answer("Сначала выполните /start")
         return
     await callback.answer()
-    await callback.message.edit_text("Введите город вылета:")
+    await callback.message.edit_text("Выбор города вылета:")
+    await callback.message.answer(
+        "Введите полное название города вылета на русском:",
+        reply_markup=_origin_reply_kb(),
+    )
     await state.set_state(SubscribeStates.waiting_for_origin_city)
 
 
@@ -93,14 +117,17 @@ async def process_origin_city_input(
         await message.answer("Город не найден. Попробуйте ещё раз:")
         return
 
+    remove_kb = ReplyKeyboardRemove()
+
     if len(cities) == 1:
         city = cities[0]
         await state.update_data(origin_iata=city.iata)
         await state.set_state(None)
         await message.answer(
             f"Город вылета: {city.name_ru} ({city.iata})\n\nВыберите тип направления:",
-            reply_markup=subscribe_type(),
+            reply_markup=remove_kb,
         )
+        await message.answer("Куда летим?", reply_markup=subscribe_type())
         return
 
     if len(cities) <= 8:
@@ -109,10 +136,14 @@ async def process_origin_city_input(
             for btn in row:
                 iata = btn.callback_data.split(":")[1]
                 btn.callback_data = f"sub_origin_pick:{iata}"
-        await message.answer("Уточните город вылета:", reply_markup=kb)
+        await message.answer("Уточните город вылета:", reply_markup=remove_kb)
+        await message.answer("Уточните город:", reply_markup=kb)
         return
 
-    await message.answer(f"Найдено слишком много ({len(cities)}). Уточните запрос:")
+    await message.answer(
+        f"Найдено слишком много ({len(cities)}). Уточните запрос:",
+        reply_markup=remove_kb,
+    )
 
 
 @router.callback_query(F.data.startswith("sub_origin_pick:"))
@@ -554,7 +585,11 @@ async def cb_edit_subscription(
     sub_id = int(callback.data.split(":")[1])
     await callback.answer()
     await state.update_data(editing_sub_id=sub_id)
-    await callback.message.edit_text("Введите город вылета:")
+    await callback.message.edit_text("Редактирование подписки:")
+    await callback.message.answer(
+        "Введите полное название города вылета на русском:",
+        reply_markup=_origin_reply_kb(),
+    )
     await state.set_state(SubscribeStates.waiting_for_origin_city)
 
 
