@@ -84,6 +84,7 @@ async def cmd_subscribe(message: Message, state: FSMContext, session: AsyncSessi
     if not user:
         await message.answer("Сначала выполните /start")
         return
+    logger.info("user_id=%d: начало создания подписки", message.from_user.id)
     await message.answer(
         "Введите полное название города вылета на русском:",
         reply_markup=_origin_reply_kb(),
@@ -111,9 +112,11 @@ async def cb_subscribe(callback: CallbackQuery, state: FSMContext, session: Asyn
 async def process_origin_city_input(
     message: Message, state: FSMContext, session: AsyncSession
 ):
-    cities = await search_cities(session, message.text.strip())
+    query = message.text.strip()
+    cities = await search_cities(session, query)
 
     if not cities:
+        logger.info("user_id=%d: город вылета не найден, запрос=%r", message.from_user.id, query)
         await message.answer("Город не найден. Попробуйте ещё раз:")
         return
 
@@ -123,6 +126,7 @@ async def process_origin_city_input(
         city = cities[0]
         await state.update_data(origin_iata=city.iata)
         await state.set_state(None)
+        logger.info("user_id=%d: origin=%s", message.from_user.id, city.iata)
         await message.answer(
             f"Город вылета: {city.name_ru} ({city.iata})\n\nВыберите тип направления:",
             reply_markup=remove_kb,
@@ -461,6 +465,7 @@ async def _finalize_subscription(
     target_price = data.get("target_price")
 
     if not all([origin_iata, dest_type, dest_code, target_price]):
+        logger.warning("user_id=%d: сессия истекла при финализации подписки", event.from_user.id)
         await _reply(event, "Сессия истекла. Начните заново с /subscribe")
         return
 
@@ -480,11 +485,20 @@ async def _finalize_subscription(
             editing_sub_id, user.id, origin_iata, dest_type, dest_code,
             date_from, date_to, max_stops, target_price,
         )
+        if updated:
+            logger.info(
+                "user_id=%d: sub_id=%d обновлена: %s→%s:%s dates=%s/%s stops=%s price=%s",
+                tg_id, editing_sub_id, origin_iata, dest_type, dest_code,
+                date_from, date_to, max_stops, target_price,
+            )
+        else:
+            logger.warning("user_id=%d: не удалось обновить sub_id=%d", tg_id, editing_sub_id)
         action_label = "✅ Подписка обновлена!" if updated else "⚠️ Не удалось обновить подписку."
     else:
         # Режим создания — проверяем лимит и создаём
         count = await sub_repo.count_active(user.id)
         if count >= 10:
+            logger.warning("user_id=%d: достигнут лимит подписок (10)", tg_id)
             await _reply(
                 event,
                 "У вас уже 10 подписок — это максимум. "
@@ -497,8 +511,14 @@ async def _finalize_subscription(
                 user.id, origin_iata, dest_type, dest_code,
                 date_from, date_to, max_stops, target_price,
             )
+            logger.info(
+                "user_id=%d: подписка создана: %s→%s:%s dates=%s/%s stops=%s price=%s",
+                tg_id, origin_iata, dest_type, dest_code,
+                date_from, date_to, max_stops, target_price,
+            )
         except IntegrityError:
             await session.rollback()
+            logger.warning("user_id=%d: дубль подписки %s→%s:%s", tg_id, origin_iata, dest_type, dest_code)
             await _reply(event, "Такая подписка у вас уже есть.")
             return
         action_label = "✅ Подписка добавлена!"
@@ -609,6 +629,10 @@ async def cb_unsub(callback: CallbackQuery, session: AsyncSession):
         return
 
     success = await sub_repo.deactivate(sub_id, user.id)
+    if success:
+        logger.info("user_id=%d: sub_id=%d удалена", callback.from_user.id, sub_id)
+    else:
+        logger.warning("user_id=%d: попытка удалить несуществующую sub_id=%d", callback.from_user.id, sub_id)
     await callback.answer("Подписка удалена" if success else "Подписка не найдена")
     await _show_subscriptions(callback, session)
 

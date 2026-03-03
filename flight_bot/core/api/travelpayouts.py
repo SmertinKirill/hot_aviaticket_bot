@@ -69,6 +69,7 @@ async def get_cheap_tickets(origin_iata: str) -> list[dict]:
                         "ticket_link": p.get("ticket_link", ""),
                     }
                 )
+            logger.info("get_cheap_tickets(%s): %d билетов", origin_iata, len(result))
             return result
 
         except Exception as e:
@@ -143,6 +144,7 @@ async def get_route_tickets(
                 "stops": r.get("transfers"),
                 "ticket_link": link,
             })
+        logger.info("get_route_tickets(%s→%s): %d билетов", origin_iata, destination_iata, len(result))
         return result
 
     except Exception as e:
