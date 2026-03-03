@@ -50,6 +50,11 @@ _REGIONS = {
     "ОАЭ и Ближний Восток": ["AE", "QA", "JO", "LB", "BH", "KW", "OM", "SA"],
     "Европа": ["DE", "FR", "IT", "ES", "CZ", "AT", "NL", "PL", "GR", "HR",
                "PT", "HU", "RO", "BG", "RS", "ME", "AL", "MK", "TR", "GE", "AM"],
+    "Море": [
+        "TR", "CY", "EG", "TN", "MA",
+        "GR", "HR", "ME", "BG",
+        "TH", "ID", "MV", "LK",
+    ],
 }
 
 
