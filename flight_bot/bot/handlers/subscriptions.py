@@ -594,7 +594,7 @@ async def _dest_label(session: AsyncSession, dest_type: str, dest_code: str) -> 
         stmt = select(City.name_ru).where(City.iata == dest_code)
         result = await session.execute(stmt)
         name = result.scalar_one_or_none()
-        return f"{name or dest_code} ({dest_code})"
+        return f"{name or dest_code}"
     return dest_code
 
 
