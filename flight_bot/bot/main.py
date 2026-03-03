@@ -41,6 +41,7 @@ async def main() -> None:
     await bot.set_my_commands([
         BotCommand(command="subscribe", description="Добавить подписку"),
         BotCommand(command="mysubscriptions", description="Мои подписки"),
+        BotCommand(command="settings", description="Настройки"),
         BotCommand(command="start", description="Главное меню"),
     ])
     await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
