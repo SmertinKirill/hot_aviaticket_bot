@@ -35,11 +35,11 @@ def subscribe_type() -> InlineKeyboardMarkup:
 def region_select() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🌏 ЮВА", callback_data="region:ЮВА")],
-            [InlineKeyboardButton(text="🌍 Европа", callback_data="region:Европа")],
+            [InlineKeyboardButton(text="🌴 ЮВА", callback_data="region:ЮВА")],
+            [InlineKeyboardButton(text="🏰 Европа", callback_data="region:Европа")],
             [
                 InlineKeyboardButton(
-                    text="🏜 ОАЭ и Ближний Восток",
+                    text="🕌 ОАЭ и Ближний Восток",
                     callback_data="region:ОАЭ и Ближний Восток",
                 )
             ],
