@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,6 +46,7 @@ class SubscriptionRepository:
                 from sqlalchemy.exc import IntegrityError
                 raise IntegrityError(None, None, Exception("duplicate active subscription"))
             existing.is_active = True
+            existing.created_at = datetime.utcnow()
             existing.date_from = date_from
             existing.date_to = date_to
             existing.max_stops = max_stops

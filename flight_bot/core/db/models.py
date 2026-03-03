@@ -72,6 +72,8 @@ class User(Base):
         String, ForeignKey("cities.iata"), nullable=True
     )
     threshold_pct: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    quiet_from: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    quiet_to: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now()

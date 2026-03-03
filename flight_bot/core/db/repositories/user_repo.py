@@ -31,6 +31,17 @@ class UserRepository:
         await self.session.commit()
         return result.scalar_one()
 
+    async def update_quiet_hours(
+        self, user_id: int, quiet_from: int | None, quiet_to: int | None
+    ) -> None:
+        stmt = (
+            update(User)
+            .where(User.id == user_id)
+            .values(quiet_from=quiet_from, quiet_to=quiet_to)
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
+
     async def update_threshold(self, user_id: int, threshold_pct: int) -> User:
         if not (20 <= threshold_pct <= 50):
             raise ValueError("Порог должен быть от 20 до 50%")

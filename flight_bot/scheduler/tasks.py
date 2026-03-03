@@ -13,7 +13,7 @@ from core import analyzer
 from core.api import cache
 from core.api.travelpayouts import get_cheap_tickets, get_route_tickets
 from core.db.base import async_session
-from core.db.models import Airport, City, Country, Subscription
+from core.db.models import Airport, City, Country, Subscription, User
 from core.db.repositories.notification_repo import NotificationRepository
 from core.db.repositories.price_history_repo import PriceHistoryRepository
 from core.db.repositories.subscription_repo import SubscriptionRepository
@@ -88,6 +88,14 @@ async def _get_city_name(iata: str, session: AsyncSession) -> str:
     return name or iata
 
 
+def _is_quiet_time(quiet_from: int, quiet_to: int) -> bool:
+    """Проверить, находимся ли в тихом периоде (московское время, UTC+3)."""
+    hour = (datetime.utcnow().hour + 3) % 24
+    if quiet_from > quiet_to:  # диапазон пересекает полночь: 22–08
+        return hour >= quiet_from or hour < quiet_to
+    return quiet_from <= hour < quiet_to
+
+
 async def _send_notification(
     bot: Bot, telegram_id: int, deal: dict, session: AsyncSession
 ) -> bool:
@@ -119,8 +127,19 @@ async def _send_notification(
         ]
     )
 
+    stmt = select(User).where(User.telegram_id == telegram_id)
+    result = await session.execute(stmt)
+    user = result.scalar_one_or_none()
+    silent = (
+        user is not None
+        and user.quiet_from is not None
+        and _is_quiet_time(user.quiet_from, user.quiet_to)
+    )
+
     try:
-        await bot.send_message(telegram_id, text, reply_markup=keyboard)
+        await bot.send_message(
+            telegram_id, text, reply_markup=keyboard, disable_notification=silent
+        )
         return True
     except Exception as e:
         logger.error(

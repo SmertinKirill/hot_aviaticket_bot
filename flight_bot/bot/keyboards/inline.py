@@ -137,6 +137,23 @@ def month_select() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def quiet_hours_menu(quiet_from: int | None) -> InlineKeyboardMarkup:
+    presets = [
+        ("🔇 22:00 – 08:00", "quiet:22:8"),
+        ("🔇 23:00 – 07:00", "quiet:23:7"),
+        ("🔇 00:00 – 09:00", "quiet:0:9"),
+    ]
+    buttons = []
+    for label, data in presets:
+        # Подсвечиваем активный пресет галочкой
+        h = int(data.split(":")[1])
+        if quiet_from == h:
+            label = "✅ " + label.lstrip("🔇 ")
+        buttons.append([InlineKeyboardButton(text=label, callback_data=data)])
+    buttons.append([InlineKeyboardButton(text="🔔 Отключить", callback_data="quiet:off")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def add_first_subscription() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
