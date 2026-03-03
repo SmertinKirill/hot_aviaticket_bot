@@ -411,14 +411,12 @@ async def cb_stops_select(
     ref_price = await _get_reference_price(
         origin_iata, dest_type, dest_code, session, date_from, date_to
     )
-    price_line = (
-        f"~{ref_price:,} ₽".replace(",", " ") if ref_price else "нет данных"
-    )
+    price_line = f"\n\n💰 Сейчас минимальная цена: ~{ref_price:,} ₽".replace(",", " ") if ref_price else ""
 
     text = (
         f"Сколько максимум вы готовы потратить на билет? (₽):\n"
-        f"(например: 30000)\n\n"
-        f"💰 Сейчас минимальная цена: {price_line}"
+        f"(например: 30000)"
+        f"{price_line}"
     )
     await state.set_state(SubscribeStates.waiting_for_target_price)
     await callback.message.edit_text(text)
@@ -658,14 +656,10 @@ async def _get_reference_price(
 
     try:
         tickets = await get_cheap_tickets(origin_iata)
-    except Exception as e:
-        logger.warning("_get_reference_price: get_cheap_tickets error: %s", e)
+    except Exception:
         return None
     if not tickets:
-        logger.warning("_get_reference_price: get_cheap_tickets вернул 0 билетов для %s", origin_iata)
         return None
-
-    logger.info("_get_reference_price: получено %d билетов из %s", len(tickets), origin_iata)
 
     # Фильтрация по датам для страны/региона.
     # get_cheap_tickets возвращает по одному (глобально дешёвому) билету на направление —
@@ -677,7 +671,6 @@ async def _get_reference_price(
             if (not date_from or (t.get("departure_at") or "")[:10] >= date_from)
             and (not date_to or (t.get("departure_at") or "")[:10] <= date_to)
         ]
-        logger.info("_get_reference_price: после фильтра по датам %d билетов", len(filtered))
         if filtered:
             tickets = filtered
 
@@ -686,22 +679,12 @@ async def _get_reference_price(
         result = await session.execute(stmt)
         city_iatas = {row[0] for row in result.all()}
         matching = [t for t in tickets if t["destination_iata"] in city_iatas]
-        logger.info(
-            "_get_reference_price: country=%s, городов в БД=%d, совпадений=%d, примеры API=%s",
-            dest_code, len(city_iatas), len(matching),
-            [t["destination_iata"] for t in tickets[:5]],
-        )
     elif dest_type == "region":
         country_codes = _REGIONS.get(dest_code, [])
         stmt = select(City.iata).where(City.country_code.in_(country_codes))
         result = await session.execute(stmt)
         city_iatas = {row[0] for row in result.all()}
         matching = [t for t in tickets if t["destination_iata"] in city_iatas]
-        logger.info(
-            "_get_reference_price: region=%s, городов в БД=%d, совпадений=%d, примеры API=%s",
-            dest_code, len(city_iatas), len(matching),
-            [t["destination_iata"] for t in tickets[:5]],
-        )
     else:
         return None
 
