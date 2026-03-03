@@ -8,7 +8,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand, MenuButtonCommands
 
 from bot.handlers import settings, start, subscriptions
-from bot.middleware import DbSessionMiddleware
+from bot.middleware import DbSessionMiddleware, LoggingMiddleware
 from bootstrap.load_references import load_if_empty
 from core.config import TELEGRAM_TOKEN
 
@@ -28,7 +28,9 @@ async def main() -> None:
     bot = Bot(token=TELEGRAM_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Middleware для сессий БД
+    # Middleware
+    dp.message.middleware(LoggingMiddleware())
+    dp.callback_query.middleware(LoggingMiddleware())
     dp.message.middleware(DbSessionMiddleware())
     dp.callback_query.middleware(DbSessionMiddleware())
 
