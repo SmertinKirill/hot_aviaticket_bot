@@ -25,9 +25,12 @@ def _build_ticket_url(ticket_link: str, route_key: str) -> str:
     if ticket_link:
         try:
             parsed = urlparse(ticket_link)
-            # Путь: /MOW1703BKK1 → /search/MOW1703BKK1
+            # GraphQL: /MOW1703BKK1 → /search/MOW1703BKK1
+            # REST:    /search/MOW1703BKK1 → /search/MOW1703BKK1 (уже есть)
             path = parsed.path.lstrip("/")
-            search_path = f"/search/{path}"
+            if not path.startswith("search/"):
+                path = f"search/{path}"
+            search_path = f"/{path}"
             # Параметры из ticket_link + marker
             params = parse_qs(parsed.query, keep_blank_values=True)
             params["marker"] = [TRAVELPAYOUTS_MARKER]

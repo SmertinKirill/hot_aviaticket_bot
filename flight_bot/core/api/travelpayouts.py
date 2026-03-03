@@ -9,7 +9,7 @@ from core.config import TRAVELPAYOUTS_TOKEN
 logger = logging.getLogger(__name__)
 
 GRAPHQL_URL = "https://api.travelpayouts.com/graphql/v1/query"
-LATEST_PRICES_URL = "https://api.travelpayouts.com/v2/prices/latest"
+REST_PRICES_URL = "https://api.travelpayouts.com/aviasales/v3/prices_for_dates"
 
 _RETRY_DELAYS = [1, 2, 4]
 
@@ -98,40 +98,28 @@ async def get_route_tickets(
 
     Возвращает список тикетов в том же формате что get_cheap_tickets.
     Используется в scheduler для city-подписок с фильтром дат.
+    REST /v3/prices_for_dates: лимит 600 req/min (vs GraphQL 60 req/min).
     """
-    query = """
-    {
-      prices_one_way(
-        params: { origin: "%s", destination: "%s" }
-        grouping: DATES
-        paging: { offset: 0 limit: 200 }
-        sorting: VALUE_ASC
-      ) {
-        departure_at
-        value
-        number_of_changes
-        ticket_link
-      }
+    params = {
+        "origin": origin_iata,
+        "destination": destination_iata,
+        "one_way": "true",
+        "currency": "rub",
+        "sorting": "price",
+        "limit": 100,
     }
-    """ % (origin_iata, destination_iata)
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                GRAPHQL_URL,
-                json={"query": query},
+            resp = await client.get(
+                REST_PRICES_URL,
+                params=params,
                 headers={"X-Access-Token": TRAVELPAYOUTS_TOKEN},
             )
             resp.raise_for_status()
             data = resp.json()
 
-        rows = data.get("data", {}).get("prices_one_way") or []
-
-        # Фильтруем только авиа
-        rows = [
-            r for r in rows
-            if r.get("transport_type") in (None, "avia", "airplane")
-        ]
+        rows = data.get("data") or []
 
         if date_from or date_to:
             rows = [
@@ -142,17 +130,17 @@ async def get_route_tickets(
 
         result = []
         for r in rows:
-            if not r.get("value", 0):
+            if not r.get("price", 0):
                 continue
-            link = r.get("ticket_link") or ""
+            link = r.get("link") or ""
             t_param = link.split("?t=")[1].split("&")[0] if "?t=" in link else ""
             if t_param.startswith("R"):  # Railway — пропускаем
                 continue
             result.append({
                 "destination_iata": destination_iata,
-                "price": int(r["value"]),
+                "price": int(r["price"]),
                 "departure_at": (r.get("departure_at") or "")[:10],
-                "stops": r.get("number_of_changes"),
+                "stops": r.get("transfers"),
                 "ticket_link": link,
             })
         return result

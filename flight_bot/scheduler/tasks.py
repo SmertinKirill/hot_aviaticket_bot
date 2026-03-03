@@ -1,5 +1,6 @@
 """Задачи мониторинга цен и отправки уведомлений."""
 
+import asyncio
 import logging
 from datetime import date, datetime
 
@@ -161,20 +162,26 @@ async def monitor_cycle(bot: Bot) -> None:
                     tickets = await get_cheap_tickets(origin)
                     if tickets:
                         await cache.set_prices(origin, tickets)
+                    await asyncio.sleep(1)
 
                 # Для city-подписок с фильтром дат — загружаем точные данные
                 # по конкретному маршруту (get_cheap_tickets даёт только 1 дату
-                # на направление, которая может не попасть в нужный период)
+                # на направление, которая может не попасть в нужный период).
+                # Дедупликация: один запрос на уникальный (dest, date_from, date_to).
                 extra_tickets: list[dict] = []
+                seen_routes: dict[tuple, list[dict]] = {}
                 for sub in subs:
                     if sub.dest_type == "city" and sub.date_from is not None:
-                        route_t = await get_route_tickets(
-                            origin,
-                            sub.dest_code,
-                            sub.date_from.isoformat(),
-                            sub.date_to.isoformat(),
-                        )
-                        extra_tickets.extend(route_t)
+                        key = (sub.dest_code, sub.date_from, sub.date_to)
+                        if key not in seen_routes:
+                            route_t = await get_route_tickets(
+                                origin,
+                                sub.dest_code,
+                                sub.date_from.isoformat(),
+                                sub.date_to.isoformat(),
+                            )
+                            seen_routes[key] = route_t
+                        extra_tickets.extend(seen_routes[key])
 
                 all_tickets = tickets + extra_tickets
 
