@@ -47,7 +47,7 @@ class PriceHistoryRepository:
             stmt = stmt.where(PriceHistory.route_key >= f"{prefix}{date_from.isoformat()}")
         if date_to:
             stmt = stmt.where(PriceHistory.route_key <= f"{prefix}{date_to.isoformat()}z")
-        stmt = stmt.order_by(PriceHistory.found_at.desc()).limit(1)
+        stmt = stmt.order_by(PriceHistory.price.asc(), PriceHistory.found_at.desc()).limit(1)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
