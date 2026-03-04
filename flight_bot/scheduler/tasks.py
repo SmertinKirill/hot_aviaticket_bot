@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import analyzer
 from core.api import cache
-from core.api.travelpayouts import get_cheap_tickets, get_route_tickets
+from core.api.travelpayouts import get_route_tickets
 from core.db.base import async_session
 from core.db.models import Airport, City, Country, Subscription, User
 from core.db.repositories.notification_repo import NotificationRepository
@@ -175,17 +175,7 @@ async def monitor_cycle(bot: Bot) -> None:
             total_deals = 0
 
             for origin, subs in origin_subs.items():
-                # Получить общие тикеты из кэша или API
-                tickets = await cache.get_prices(origin)
-                if tickets is None:
-                    tickets = await get_cheap_tickets(origin)
-                    if tickets:
-                        await cache.set_prices(origin, tickets)
-                    await asyncio.sleep(1)
-
-                # Для city-подписок с фильтром дат — загружаем точные данные
-                # по конкретному маршруту (get_cheap_tickets даёт только 1 дату
-                # на направление, которая может не попасть в нужный период).
+                # City-подписки: запрашиваем конкретный маршрут с фильтром дат.
                 # Дедупликация: один запрос на уникальный (dest, date_from, date_to).
                 extra_tickets: list[dict] = []
                 seen_routes: dict[tuple, list[dict]] = {}
@@ -202,7 +192,27 @@ async def monitor_cycle(bot: Bot) -> None:
                             seen_routes[key] = route_t
                         extra_tickets.extend(seen_routes[key])
 
-                all_tickets = tickets + extra_tickets
+                # Для country/region подписок: дёргаем /v3/prices_for_dates
+                # с кодом страны — API принимает 2-буквенный код и возвращает
+                # рейсы во все города этой страны за один запрос.
+                country_codes_needed: set[str] = set()
+                for sub in subs:
+                    if sub.dest_type == "country":
+                        country_codes_needed.add(sub.dest_code)
+                    elif sub.dest_type == "region":
+                        for cc in REGIONS.get(sub.dest_code, []):
+                            country_codes_needed.add(cc)
+
+                for cc in country_codes_needed:
+                    cache_key = f"{origin}:{cc}"
+                    cc_tickets = await cache.get_prices(cache_key)
+                    if cc_tickets is None:
+                        cc_tickets = await get_route_tickets(origin, cc)
+                        await cache.set_prices(cache_key, cc_tickets)
+                        await asyncio.sleep(1)
+                    extra_tickets.extend(cc_tickets)
+
+                all_tickets = extra_tickets
 
                 # Записать в price_history
                 for ticket in all_tickets:

@@ -113,7 +113,6 @@ def date_type_select() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(text="🗓 Месяц", callback_data="date_type:month"),
-                InlineKeyboardButton(text="⏩ Любая дата", callback_data="date_type:any"),
             ],
         ]
     )

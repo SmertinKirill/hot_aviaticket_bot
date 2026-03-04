@@ -27,7 +27,7 @@ from bot.keyboards.inline import (
     subscription_list,
 )
 from bot.states import SubscribeStates
-from core.api.travelpayouts import get_cheap_tickets, get_global_min_price
+from core.api.travelpayouts import get_global_min_price, get_route_tickets
 from core.db.models import City, Country
 from core.db.repositories.subscription_repo import SubscriptionRepository
 from core.db.repositories.user_repo import UserRepository
@@ -67,6 +67,10 @@ _POPULAR_ORIGINS = [
 ]
 
 
+def _fmt_user(tg_user) -> str:
+    return f"@{tg_user.username}" if tg_user.username else f"id={tg_user.id}"
+
+
 def _origin_reply_kb() -> ReplyKeyboardMarkup:
     buttons = [
         [KeyboardButton(text=city) for city in _POPULAR_ORIGINS[:3]],
@@ -84,7 +88,7 @@ async def cmd_subscribe(message: Message, state: FSMContext, session: AsyncSessi
     if not user:
         await message.answer("Сначала выполните /start")
         return
-    logger.info("user_id=%d: начало создания подписки", message.from_user.id)
+    logger.info("%s: начало создания подписки", _fmt_user(message.from_user))
     await message.answer(
         "Введите полное название города вылета на русском:",
         reply_markup=_origin_reply_kb(),
@@ -116,7 +120,7 @@ async def process_origin_city_input(
     cities = await search_cities(session, query)
 
     if not cities:
-        logger.info("user_id=%d: город вылета не найден, запрос=%r", message.from_user.id, query)
+        logger.info("%s: город вылета не найден, запрос=%r", _fmt_user(message.from_user), query)
         await message.answer("Город не найден. Попробуйте ещё раз:")
         return
 
@@ -126,7 +130,7 @@ async def process_origin_city_input(
         city = cities[0]
         await state.update_data(origin_iata=city.iata)
         await state.set_state(None)
-        logger.info("user_id=%d: origin=%s", message.from_user.id, city.iata)
+        logger.info("%s: origin=%s", _fmt_user(message.from_user), city.iata)
         await message.answer(
             f"Город вылета: {city.name_ru} ({city.iata})\n\nВыберите тип направления:",
             reply_markup=remove_kb,
@@ -315,14 +319,6 @@ async def cb_date_type(callback: CallbackQuery, state: FSMContext):
     dtype = callback.data.split(":")[1]
     await callback.answer()
 
-    if dtype == "any":
-        await state.update_data(date_from=None, date_to=None)
-        await state.set_state(None)
-        await callback.message.edit_text(
-            "Количество пересадок:", reply_markup=stops_select()
-        )
-        return
-
     if dtype == "month":
         await callback.message.edit_text("Выберите месяц:", reply_markup=month_select())
         return
@@ -396,7 +392,7 @@ async def process_date_input(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("stops:"))
 async def cb_stops_select(
-    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+    callback: CallbackQuery, state: FSMContext
 ):
     max_stops = int(callback.data.split(":")[1])
     await callback.answer()
@@ -413,7 +409,7 @@ async def cb_stops_select(
     await callback.message.edit_text("⏳ Загружаем данные о ценах...")
 
     ref_price = await _get_reference_price(
-        origin_iata, dest_type, dest_code, session, date_from, date_to
+        origin_iata, dest_type, dest_code, date_from, date_to
     )
     price_line = f"\n\n💰 Сейчас минимальная цена: ~{ref_price:,} ₽".replace(",", " ") if ref_price else ""
 
@@ -465,7 +461,7 @@ async def _finalize_subscription(
     target_price = data.get("target_price")
 
     if not all([origin_iata, dest_type, dest_code, target_price]):
-        logger.warning("user_id=%d: сессия истекла при финализации подписки", event.from_user.id)
+        logger.warning("%s: сессия истекла при финализации подписки", _fmt_user(event.from_user))
         await _reply(event, "Сессия истекла. Начните заново с /subscribe")
         return
 
@@ -473,6 +469,7 @@ async def _finalize_subscription(
     sub_repo = SubscriptionRepository(session)
 
     tg_id = event.from_user.id
+    tg_user = _fmt_user(event.from_user)
     user = await user_repo.get_by_telegram_id(tg_id)
     if not user:
         return
@@ -512,7 +509,7 @@ async def _finalize_subscription(
                 date_from, date_to, max_stops, target_price,
             )
             logger.info(
-                "user_id=%d: подписка создана: %s→%s:%s dates=%s/%s stops=%s price=%s",
+                "user_id=%d: подписка создана OK: %s→%s:%s dates=%s/%s stops=%s price=%s",
                 tg_id, origin_iata, dest_type, dest_code,
                 date_from, date_to, max_stops, target_price,
             )
@@ -630,9 +627,9 @@ async def cb_unsub(callback: CallbackQuery, session: AsyncSession):
 
     success = await sub_repo.deactivate(sub_id, user.id)
     if success:
-        logger.info("user_id=%d: sub_id=%d удалена", callback.from_user.id, sub_id)
+        logger.info("%s: sub_id=%d удалена", _fmt_user(callback.from_user), sub_id)
     else:
-        logger.warning("user_id=%d: попытка удалить несуществующую sub_id=%d", callback.from_user.id, sub_id)
+        logger.warning("%s: попытка удалить несуществующую sub_id=%d", _fmt_user(callback.from_user), sub_id)
     await callback.answer("Подписка удалена" if success else "Подписка не найдена")
     await _show_subscriptions(callback, session)
 
@@ -664,7 +661,6 @@ async def _get_reference_price(
     origin_iata: str,
     dest_type: str,
     dest_code: str,
-    session: AsyncSession,
     date_from: str | None = None,
     date_to: str | None = None,
 ) -> int | None:
@@ -678,41 +674,24 @@ async def _get_reference_price(
         except Exception:
             return None
 
-    try:
-        tickets = await get_cheap_tickets(origin_iata)
-    except Exception:
-        return None
-    if not tickets:
-        return None
-
-    # Фильтрация по датам для страны/региона.
-    # get_cheap_tickets возвращает по одному (глобально дешёвому) билету на направление —
-    # его дата может не попасть в нужный диапазон. Если после фильтра пусто,
-    # используем нефильтрованные данные как приблизительный ориентир.
-    if date_from or date_to:
-        filtered = [
-            t for t in tickets
-            if (not date_from or (t.get("departure_at") or "")[:10] >= date_from)
-            and (not date_to or (t.get("departure_at") or "")[:10] <= date_to)
-        ]
-        if filtered:
-            tickets = filtered
-
+    # Для страны/региона: запрашиваем по коду страны через REST.
+    # Берём первую страну региона как ориентир — это лишь подсказка при создании подписки.
     if dest_type == "country":
-        stmt = select(City.iata).where(City.country_code == dest_code)
-        result = await session.execute(stmt)
-        city_iatas = {row[0] for row in result.all()}
-        matching = [t for t in tickets if t["destination_iata"] in city_iatas]
+        country_codes = [dest_code]
     elif dest_type == "region":
         country_codes = _REGIONS.get(dest_code, [])
-        stmt = select(City.iata).where(City.country_code.in_(country_codes))
-        result = await session.execute(stmt)
-        city_iatas = {row[0] for row in result.all()}
-        matching = [t for t in tickets if t["destination_iata"] in city_iatas]
     else:
         return None
 
-    prices = [t["price"] for t in matching if t["price"] > 0]
+    if not country_codes:
+        return None
+
+    try:
+        tickets = await get_route_tickets(origin_iata, country_codes[0], date_from, date_to)
+    except Exception:
+        return None
+
+    prices = [t["price"] for t in tickets if t["price"] > 0]
     return min(prices) if prices else None
 
 
@@ -729,7 +708,9 @@ def _date_label(date_from: date | None, date_to: date | None) -> str:
         and date_to.day == last_day
     ):
         return f" · {MONTHS_NOM[date_from.month]} {date_from.year}"
-    return f" · {date_from.strftime('%d.%m')}–{date_to.strftime('%d.%m.%Y')}"
+    if date_from.year == date_to.year:
+        return f" · {date_from.strftime('%d.%m')}–{date_to.strftime('%d.%m.%Y')}"
+    return f" · {date_from.strftime('%d.%m.%Y')}–{date_to.strftime('%d.%m.%Y')}"
 
 
 def _parse_single_date(s: str) -> date | None:

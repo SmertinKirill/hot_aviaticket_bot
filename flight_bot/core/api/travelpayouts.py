@@ -138,7 +138,7 @@ async def get_route_tickets(
             if t_param.startswith("R"):  # Railway — пропускаем
                 continue
             result.append({
-                "destination_iata": destination_iata,
+                "destination_iata": r.get("destination", destination_iata),
                 "price": int(r["price"]),
                 "departure_at": (r.get("departure_at") or "")[:10],
                 "stops": r.get("transfers"),
