@@ -94,12 +94,15 @@ async def get_route_tickets(
     destination_iata: str,
     date_from: str | None = None,
     date_to: str | None = None,
+    departure_month: str | None = None,
 ) -> list[dict]:
     """Получить билеты для конкретного маршрута с фильтрацией по датам.
 
-    Возвращает список тикетов в том же формате что get_cheap_tickets.
-    Используется в scheduler для city-подписок с фильтром дат.
-    REST /v3/prices_for_dates: лимит 600 req/min (vs GraphQL 60 req/min).
+    departure_month (YYYY-MM) — передаётся в API для фильтрации на стороне сервера.
+    Используется для country/region подписок чтобы получить рейсы в нужный месяц,
+    а не только ближайшие 100 дешёвых.
+    date_from / date_to — дополнительная клиентская фильтрация.
+    REST /v3/prices_for_dates: лимит 600 req/min.
     """
     params = {
         "origin": origin_iata,
@@ -109,6 +112,8 @@ async def get_route_tickets(
         "sorting": "price",
         "limit": 100,
     }
+    if departure_month:
+        params["departure_at"] = departure_month
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:

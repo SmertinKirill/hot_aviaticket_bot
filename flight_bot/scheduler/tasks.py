@@ -193,24 +193,32 @@ async def monitor_cycle(bot: Bot) -> None:
                         extra_tickets.extend(seen_routes[key])
 
                 # Для country/region подписок: дёргаем /v3/prices_for_dates
-                # с кодом страны — API принимает 2-буквенный код и возвращает
-                # рейсы во все города этой страны за один запрос.
-                country_codes_needed: set[str] = set()
+                # с кодом страны. date_from нормализуем до начала месяца —
+                # все подписки в одном месяце дают один запрос/кеш-ключ.
+                # Точная фильтрация дат — в памяти через _ticket_matches.
+                # Ключ дедупликации: (country, YYYY-MM).
+                seen_country_months: dict[tuple, list[dict]] = {}
                 for sub in subs:
                     if sub.dest_type == "country":
-                        country_codes_needed.add(sub.dest_code)
+                        country_codes = [sub.dest_code]
                     elif sub.dest_type == "region":
-                        for cc in REGIONS.get(sub.dest_code, []):
-                            country_codes_needed.add(cc)
+                        country_codes = REGIONS.get(sub.dest_code, [])
+                    else:
+                        continue
 
-                for cc in country_codes_needed:
-                    cache_key = f"{origin}:{cc}"
-                    cc_tickets = await cache.get_prices(cache_key)
-                    if cc_tickets is None:
-                        cc_tickets = await get_route_tickets(origin, cc)
-                        await cache.set_prices(cache_key, cc_tickets)
-                        await asyncio.sleep(1)
-                    extra_tickets.extend(cc_tickets)
+                    month_key = sub.date_from.strftime("%Y-%m") if sub.date_from else ""
+
+                    for cc in country_codes:
+                        key = (cc, month_key)
+                        if key not in seen_country_months:
+                            cache_key = f"{origin}:{cc}:{month_key}"
+                            cc_tickets = await cache.get_prices(cache_key)
+                            if cc_tickets is None:
+                                cc_tickets = await get_route_tickets(origin, cc, departure_month=month_key)
+                                await cache.set_prices(cache_key, cc_tickets)
+                                await asyncio.sleep(1)
+                            seen_country_months[key] = cc_tickets
+                        extra_tickets.extend(seen_country_months[key])
 
                 all_tickets = extra_tickets
 
