@@ -108,11 +108,22 @@ async def _send_notification(
     date_str = parts[2] if len(parts) >= 3 else ""
     date_formatted = _format_date_ru(date_str)
 
+    stops = deal.get("stops")
+    if stops == 0:
+        stops_line = "✈️ Прямой рейс"
+    elif stops == 1:
+        stops_line = "🔄 1 пересадка"
+    elif stops is not None:
+        stops_line = f"🔄 {stops} пересадки"
+    else:
+        stops_line = ""
+
     text = (
         f"🔥 Горящий билет!\n\n"
         f"{origin_name} → {dest_name} ({deal['dest_iata']})\n"
         f"📅 Вылет: {date_formatted}\n"
-        f"💰 {deal['current_price']:,} ₽  "
+        + (f"{stops_line}\n" if stops_line else "")
+        + f"💰 {deal['current_price']:,} ₽  "
         f"(ваш порог: {deal['target_price']:,} ₽)\n\n"
         f"⚡ Цена может измениться — бронируйте быстро"
     ).replace(",", " ")
@@ -222,13 +233,15 @@ async def monitor_cycle(bot: Bot) -> None:
 
                 all_tickets = extra_tickets
 
-                # Записать в price_history
+                # Записать в price_history + собрать lookup stops по route_key
+                stops_lookup: dict[str, int | None] = {}
                 for ticket in all_tickets:
                     dest = ticket["destination_iata"]
                     departure = ticket["departure_at"]
                     if not dest or not departure:
                         continue
                     route_key = f"{origin}:{dest}:{departure}"
+                    stops_lookup[route_key] = ticket.get("stops")
                     await price_repo.add(
                         route_key=route_key,
                         price=ticket["price"],
@@ -262,6 +275,7 @@ async def monitor_cycle(bot: Bot) -> None:
                         total_routes += 1
                         deal = await analyzer.check(sub, origin, dest, session)
                         if deal is not None:
+                            deal["stops"] = stops_lookup.get(deal["route_key"])
                             total_deals += 1
                             savings_pct = round(
                                 (deal["target_price"] - deal["current_price"])
