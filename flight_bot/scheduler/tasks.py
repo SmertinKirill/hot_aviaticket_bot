@@ -5,12 +5,12 @@ import logging
 from datetime import date, datetime
 
 from aiogram import Bot
+from aiogram.exceptions import TelegramRetryAfter
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import analyzer
-from core.api import cache
 from core.api.travelpayouts import get_route_tickets
 from core.db.base import async_session
 from core.db.models import Airport, City, Country, Subscription, User
@@ -151,11 +151,21 @@ async def _send_notification(
         await bot.send_message(
             telegram_id, text, reply_markup=keyboard, disable_notification=silent
         )
+        await asyncio.sleep(0.05)  # не более 20 сообщений/сек (лимит TG: 30/сек)
         return True
+    except TelegramRetryAfter as e:
+        logger.warning("Telegram rate limit, ждём %d сек", e.retry_after)
+        await asyncio.sleep(e.retry_after)
+        try:
+            await bot.send_message(
+                telegram_id, text, reply_markup=keyboard, disable_notification=silent
+            )
+            return True
+        except Exception as e2:
+            logger.error("Ошибка отправки после retry user=%d: %s", telegram_id, e2)
+            return False
     except Exception as e:
-        logger.error(
-            "Ошибка отправки уведомления user=%d: %s", telegram_id, e
-        )
+        logger.error("Ошибка отправки уведомления user=%d: %s", telegram_id, e)
         return False
 
 
@@ -200,6 +210,7 @@ async def monitor_cycle(bot: Bot) -> None:
                                 sub.date_from.isoformat(),
                                 sub.date_to.isoformat(),
                             )
+                            await asyncio.sleep(0.5)
                             seen_routes[key] = route_t
                         extra_tickets.extend(seen_routes[key])
 
@@ -222,12 +233,8 @@ async def monitor_cycle(bot: Bot) -> None:
                     for cc in country_codes:
                         key = (cc, month_key)
                         if key not in seen_country_months:
-                            cache_key = f"{origin}:{cc}:{month_key}"
-                            cc_tickets = await cache.get_prices(cache_key)
-                            if cc_tickets is None:
-                                cc_tickets = await get_route_tickets(origin, cc, departure_month=month_key)
-                                await cache.set_prices(cache_key, cc_tickets)
-                                await asyncio.sleep(1)
+                            cc_tickets = await get_route_tickets(origin, cc, departure_month=month_key)
+                            await asyncio.sleep(0.5)
                             seen_country_months[key] = cc_tickets
                         extra_tickets.extend(seen_country_months[key])
 
