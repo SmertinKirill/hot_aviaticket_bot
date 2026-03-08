@@ -283,6 +283,14 @@ async def monitor_cycle(bot: Bot) -> None:
                         deal = await analyzer.check(sub, origin, dest, session)
                         if deal is not None:
                             deal["stops"] = stops_lookup.get(deal["route_key"])
+                            # Проверяем пересадки у конкретного тикета из deal —
+                            # analyzer мог вернуть более дешёвый рейс с лишними пересадками
+                            if (
+                                sub.max_stops is not None
+                                and deal["stops"] is not None
+                                and deal["stops"] > sub.max_stops
+                            ):
+                                continue
                             total_deals += 1
                             savings_pct = round(
                                 (deal["target_price"] - deal["current_price"])
