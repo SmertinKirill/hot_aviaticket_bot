@@ -38,7 +38,7 @@ async def shorten_link(url: str) -> str:
                 return url
             data = resp.json()
         partner_url = data["result"]["links"][0]["partner_url"]
-        return f"{partner_url}?sub_id=tg_bot"
+        return f"{partner_url}?sub_id=1"
     except Exception as e:
         logger.warning("shorten_link ошибка, fallback на исходный URL: %s", e)
     return url

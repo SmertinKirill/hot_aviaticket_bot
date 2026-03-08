@@ -2,18 +2,19 @@
 
 import asyncio
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramRetryAfter
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import analyzer
 from core.api.travelpayouts import get_route_tickets, shorten_link
 from core.db.base import async_session
-from core.db.models import Airport, City, Country, Subscription, User
+from core.db.models import Airport, City, Country, Notification, Subscription, User
+from core.config import ADMIN_IDS
 from core.db.repositories.notification_repo import NotificationRepository
 from core.db.repositories.price_history_repo import PriceHistoryRepository
 from core.db.repositories.subscription_repo import SubscriptionRepository
@@ -362,3 +363,43 @@ async def clean_old_prices() -> None:
             logger.info("Retention: удалено %d записей старше 12 недель", deleted)
     except Exception as e:
         logger.error("Ошибка retention job: %s", e)
+
+
+async def send_weekly_stats(bot: Bot) -> None:
+    """Отправить недельную статистику всем администраторам."""
+    if not ADMIN_IDS:
+        return
+    try:
+        week_ago = datetime.utcnow() - timedelta(days=7)
+        async with async_session() as session:
+            active_users = (await session.execute(
+                select(func.count()).select_from(User).where(User.is_active == True)  # noqa: E712
+            )).scalar() or 0
+
+            new_users = (await session.execute(
+                select(func.count()).select_from(User).where(User.created_at >= week_ago)
+            )).scalar() or 0
+
+            notifications_sent = (await session.execute(
+                select(func.count()).select_from(Notification).where(Notification.sent_at >= week_ago)
+            )).scalar() or 0
+
+            active_subs = (await session.execute(
+                select(func.count()).select_from(Subscription).where(Subscription.is_active == True)  # noqa: E712
+            )).scalar() or 0
+
+        text = (
+            "📊 Статистика за неделю\n\n"
+            f"👥 Активных пользователей: {active_users}\n"
+            f"🆕 Новых за неделю: {new_users}\n"
+            f"📬 Уведомлений отправлено: {notifications_sent}\n"
+            f"📋 Активных подписок: {active_subs}"
+        )
+        for admin_id in ADMIN_IDS:
+            try:
+                await bot.send_message(admin_id, text)
+            except Exception as e:
+                logger.warning("Weekly stats: ошибка отправки admin=%d: %s", admin_id, e)
+
+    except Exception as e:
+        logger.error("Ошибка weekly stats job: %s", e)

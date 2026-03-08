@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.inline import quiet_hours_menu
+from core.config import ADMIN_IDS
 from core.db.repositories.subscription_repo import SubscriptionRepository
 from core.db.repositories.user_repo import UserRepository
 
@@ -51,9 +52,12 @@ async def _show_settings(event: Message | CallbackQuery, session: AsyncSession):
         f"📋 Активных подписок: {count}/10\n"
         f"🌙 Тихий режим: {quiet_label}"
     )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
+    rows = [
         [InlineKeyboardButton(text="🌙 Тихий режим", callback_data="quiet_menu")],
-    ])
+    ]
+    if ADMIN_IDS:
+        rows.append([InlineKeyboardButton(text="💬 Поддержка", callback_data="support")])
+    kb = InlineKeyboardMarkup(inline_keyboard=rows)
 
     if isinstance(event, CallbackQuery):
         await event.message.edit_text(text, reply_markup=kb)

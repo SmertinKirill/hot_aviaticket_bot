@@ -8,7 +8,7 @@ from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from core.config import TELEGRAM_TOKEN
-from scheduler.tasks import clean_old_prices, monitor_cycle
+from scheduler.tasks import clean_old_prices, monitor_cycle, send_weekly_stats
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,6 +28,12 @@ async def main() -> None:
     )
     scheduler.add_job(
         clean_old_prices, "interval", days=1, id="retention"
+    )
+    scheduler.add_job(
+        send_weekly_stats, "cron",
+        day_of_week="mon", hour=9, minute=0,
+        args=[bot], id="weekly_stats",
+        timezone="Europe/Moscow",
     )
 
     scheduler.start()

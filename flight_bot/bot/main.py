@@ -7,7 +7,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand, MenuButtonCommands
 
-from bot.handlers import settings, start, subscriptions
+from bot.handlers import admin, settings, start, subscriptions
 from bot.middleware import DbSessionMiddleware, LoggingMiddleware
 from bootstrap.load_references import load_if_empty
 from core.config import TELEGRAM_TOKEN
@@ -35,6 +35,7 @@ async def main() -> None:
     dp.callback_query.middleware(DbSessionMiddleware())
 
     # Роутеры
+    dp.include_router(admin.router)
     dp.include_router(start.router)
     dp.include_router(subscriptions.router)
     dp.include_router(settings.router)

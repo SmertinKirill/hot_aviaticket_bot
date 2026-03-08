@@ -10,6 +10,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -127,6 +128,19 @@ class PriceHistory(Base):
     __table_args__ = (
         Index("ix_price_history_route_found", "route_key", "found_at"),
     )
+
+
+class SupportTicket(Base):
+    __tablename__ = "support_tickets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_telegram_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    user_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    reply: Mapped[str | None] = mapped_column(Text, nullable=True)
+    admin_telegram_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    replied_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class Notification(Base):

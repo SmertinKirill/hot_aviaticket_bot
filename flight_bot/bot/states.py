@@ -7,3 +7,15 @@ class SubscribeStates(StatesGroup):
     waiting_for_country_input = State()
     waiting_for_date_input = State()
     waiting_for_target_price = State()
+
+
+class BroadcastStates(StatesGroup):
+    waiting_for_text = State()
+
+
+class SupportStates(StatesGroup):
+    waiting_for_message = State()
+
+
+class AdminReplyStates(StatesGroup):
+    waiting_for_reply = State()
