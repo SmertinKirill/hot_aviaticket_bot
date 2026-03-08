@@ -31,7 +31,7 @@ async def main() -> None:
     )
     scheduler.add_job(
         send_weekly_stats, "cron",
-        day_of_week="mon", hour=9, minute=0,
+        day_of_week="thu", hour=12, minute=0,
         args=[bot], id="weekly_stats",
         timezone="Europe/Moscow",
     )
