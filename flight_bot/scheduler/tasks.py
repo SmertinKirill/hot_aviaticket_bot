@@ -124,22 +124,25 @@ async def _send_notification(
     date_formatted = _format_date_ru(date_str)
 
     stops = deal.get("stops")
+    layover = deal.get("layover")
     if stops == 0:
         stops_line = "✈️ Прямой рейс"
     elif stops == 1:
-        stops_line = "🔄 1 пересадка"
+        layover_str = f" ({layover // 60} ч {layover % 60} мин)" if layover else ""
+        stops_line = f"🔄 1 пересадка{layover_str}"
     elif stops is not None:
-        stops_line = f"🔄 {stops} пересадки"
+        layover_str = f" ({layover // 60} ч {layover % 60} мин)" if layover else ""
+        stops_line = f"🔄 {stops} пересадки{layover_str}"
     else:
         stops_line = ""
 
     prev_price = deal.get("prev_price")
     if prev_price is not None and prev_price > deal["current_price"]:
         drop = prev_price - deal["current_price"]
-        drop_line = f"📉 Дешевле на {drop:,} ₽ с прошлого уведомления\n"
+        drop_line = f"📉 −{drop:,} ₽ от прошлого уведомления\n"
     else:
         drop = deal["target_price"] - deal["current_price"]
-        drop_line = f"📉 Дешевле на {drop:,} ₽ от установленной вами цены\n"
+        drop_line = f"📉 −{drop:,} ₽ от установленной вами цены\n"
 
     text = (
         f"🔥 Горящий билет!\n\n"
@@ -151,7 +154,7 @@ async def _send_notification(
         + f"💰 {deal['current_price']:,} ₽  "
         f"(ваша цена: {deal['target_price']:,} ₽)\n"
         + drop_line
-        + f"\n⚡ Цена может измениться — бронируйте быстро"
+        + f"\n⚡ Цена может измениться — бронируйте быстрее!"
     ).replace(",", " ")
 
     keyboard = InlineKeyboardMarkup(
@@ -266,8 +269,9 @@ async def monitor_cycle(bot: Bot) -> None:
 
                 all_tickets = extra_tickets
 
-                # Записать в price_history + собрать lookup stops по route_key
+                # Записать в price_history + собрать lookup stops/duration по route_key
                 stops_lookup: dict[str, int | None] = {}
+                layover_lookup: dict[str, int | None] = {}
                 for ticket in all_tickets:
                     dest = ticket["destination_iata"]
                     departure = ticket["departure_at"]
@@ -275,6 +279,12 @@ async def monitor_cycle(bot: Bot) -> None:
                         continue
                     route_key = f"{origin}:{dest}:{departure}"
                     stops_lookup[route_key] = ticket.get("stops")
+                    duration = ticket.get("duration")
+                    duration_to = ticket.get("duration_to")
+                    if duration is not None and duration_to is not None:
+                        layover_lookup[route_key] = duration - duration_to
+                    else:
+                        layover_lookup[route_key] = None
                     await price_repo.add(
                         route_key=route_key,
                         price=ticket["price"],
@@ -284,7 +294,7 @@ async def monitor_cycle(bot: Bot) -> None:
                 # Проверить подписки
                 for sub in subs:
                     destinations = await resolve_destinations(sub, session)
-                    # Фильтрация тикетов по дате и пересадкам подписки
+                    # Фильтрация тикетов по дате, пересадкам и времени в пути
                     def _ticket_matches(t: dict) -> bool:
                         if sub.date_from is not None:
                             d = _parse_ticket_date(t["departure_at"])
@@ -294,6 +304,13 @@ async def monitor_cycle(bot: Bot) -> None:
                             stops = t.get("stops")
                             if stops is not None and stops > sub.max_stops:
                                 return False
+                        if sub.max_duration is not None:
+                            duration = t.get("duration")
+                            duration_to = t.get("duration_to")
+                            if duration is not None and duration_to is not None:
+                                layover = duration - duration_to
+                                if layover > sub.max_duration:
+                                    return False
                         return True
 
                     sub_available = {
@@ -309,6 +326,7 @@ async def monitor_cycle(bot: Bot) -> None:
                         deal = await analyzer.check(sub, origin, dest, session)
                         if deal is not None:
                             deal["stops"] = stops_lookup.get(deal["route_key"])
+                            deal["layover"] = layover_lookup.get(deal["route_key"])
                             # Проверяем пересадки у конкретного тикета из deal —
                             # analyzer мог вернуть более дешёвый рейс с лишними пересадками
                             if (

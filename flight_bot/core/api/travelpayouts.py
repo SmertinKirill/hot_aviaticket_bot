@@ -178,6 +178,8 @@ async def get_route_tickets(
                 "price": int(r["price"]),
                 "departure_at": (r.get("departure_at") or "")[:10],
                 "stops": r.get("transfers"),
+                "duration": r.get("duration"),     # минуты, полное время (полёт + пересадки)
+                "duration_to": r.get("duration_to"),  # минуты, только время в воздухе
                 "ticket_link": link,
             })
         logger.info("get_route_tickets(%s→%s): %d билетов", origin_iata, destination_iata, len(result))

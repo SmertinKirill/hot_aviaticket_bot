@@ -101,6 +101,7 @@ class Subscription(Base):
     date_from: Mapped[date | None] = mapped_column(Date, nullable=True)
     date_to: Mapped[date | None] = mapped_column(Date, nullable=True)
     max_stops: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_duration: Mapped[int | None] = mapped_column(Integer, nullable=True)  # минуты
     target_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(

@@ -29,6 +29,7 @@ class SubscriptionRepository:
         date_from: date | None = None,
         date_to: date | None = None,
         max_stops: int | None = None,
+        max_duration: int | None = None,
         target_price: int | None = None,
     ) -> Subscription:
         # Если подписка уже есть (в т.ч. неактивная) — реактивируем её
@@ -50,6 +51,7 @@ class SubscriptionRepository:
             existing.date_from = date_from
             existing.date_to = date_to
             existing.max_stops = max_stops
+            existing.max_duration = max_duration
             existing.target_price = target_price
             await self.session.commit()
             await self.session.refresh(existing)
@@ -63,6 +65,7 @@ class SubscriptionRepository:
             date_from=date_from,
             date_to=date_to,
             max_stops=max_stops,
+            max_duration=max_duration,
             target_price=target_price,
         )
         self.session.add(sub)
@@ -80,6 +83,7 @@ class SubscriptionRepository:
         date_from: date | None = None,
         date_to: date | None = None,
         max_stops: int | None = None,
+        max_duration: int | None = None,
         target_price: int | None = None,
     ) -> bool:
         stmt = (
@@ -95,6 +99,7 @@ class SubscriptionRepository:
                 date_from=date_from,
                 date_to=date_to,
                 max_stops=max_stops,
+                max_duration=max_duration,
                 target_price=target_price,
             )
         )

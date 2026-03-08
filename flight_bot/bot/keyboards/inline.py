@@ -104,6 +104,18 @@ def stops_select() -> InlineKeyboardMarkup:
     )
 
 
+def duration_select() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⚡ До 4 часов", callback_data="duration:240")],
+            [InlineKeyboardButton(text="🕐 До 8 часов", callback_data="duration:480")],
+            [InlineKeyboardButton(text="🕑 До 18 часов", callback_data="duration:1080")],
+            [InlineKeyboardButton(text="🕒 До 24 часов", callback_data="duration:1440")],
+            [InlineKeyboardButton(text="♾ Без ограничений", callback_data="duration:0")],
+        ]
+    )
+
+
 def date_type_select() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[

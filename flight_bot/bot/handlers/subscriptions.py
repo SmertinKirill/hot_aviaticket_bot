@@ -20,6 +20,7 @@ from bot.keyboards.inline import (
     city_select,
     country_select,
     date_type_select,
+    duration_select,
     month_select,
     region_select,
     stops_select,
@@ -46,6 +47,7 @@ MONTHS_NOM = {
     9: "сентябрь", 10: "октябрь", 11: "ноябрь", 12: "декабрь",
 }
 STOPS_LABELS = {0: "только прямые", 1: "до 1 пересадки", 2: "до 2 пересадок"}
+DURATION_LABELS = {240: "до 4 ч", 480: "до 8 ч", 1080: "до 18 ч", 1440: "до 24 ч"}
 
 # Регионы (дублируем здесь для вычисления reference price)
 _REGIONS = {
@@ -391,21 +393,30 @@ async def process_date_input(message: Message, state: FSMContext):
 # --- Выбор пересадок → сводка + ввод цены ---
 
 @router.callback_query(F.data.startswith("stops:"))
-async def cb_stops_select(
-    callback: CallbackQuery, state: FSMContext
-):
+async def cb_stops_select(callback: CallbackQuery, state: FSMContext):
     max_stops = int(callback.data.split(":")[1])
     await callback.answer()
     await state.update_data(max_stops=max_stops)
+    await callback.message.edit_text(
+        "Максимальное время пересадок:",
+        reply_markup=duration_select(),
+    )
+
+
+@router.callback_query(F.data.startswith("duration:"))
+async def cb_duration_select(callback: CallbackQuery, state: FSMContext):
+    value = int(callback.data.split(":")[1])
+    max_duration = value if value > 0 else None
+    await callback.answer()
+    await state.update_data(max_duration=max_duration)
 
     data = await state.get_data()
     origin_iata = data.get("origin_iata")
     dest_type = data.get("pending_dest_type")
     dest_code = data.get("pending_dest_code")
-    date_from = data.get("date_from")  # ISO строка или None
-    date_to = data.get("date_to")      # ISO строка или None
+    date_from = data.get("date_from")
+    date_to = data.get("date_to")
 
-    # Показываем "загрузка" пока получаем цены
     await callback.message.edit_text("⏳ Загружаем данные о ценах...")
 
     ref_price = await _get_reference_price(
@@ -458,6 +469,7 @@ async def _finalize_subscription(
     date_from = date.fromisoformat(data["date_from"]) if data.get("date_from") else None
     date_to = date.fromisoformat(data["date_to"]) if data.get("date_to") else None
     max_stops = data.get("max_stops")
+    max_duration = data.get("max_duration")
     target_price = data.get("target_price")
 
     if not all([origin_iata, dest_type, dest_code, target_price]):
@@ -480,7 +492,7 @@ async def _finalize_subscription(
         # Режим редактирования — обновляем существующую подписку
         updated = await sub_repo.update(
             editing_sub_id, user.id, origin_iata, dest_type, dest_code,
-            date_from, date_to, max_stops, target_price,
+            date_from, date_to, max_stops, max_duration, target_price,
         )
         if updated:
             logger.info(
@@ -506,7 +518,7 @@ async def _finalize_subscription(
         try:
             await sub_repo.create(
                 user.id, origin_iata, dest_type, dest_code,
-                date_from, date_to, max_stops, target_price,
+                date_from, date_to, max_stops, max_duration, target_price,
             )
             logger.info(
                 "user_id=%d: подписка создана OK: %s→%s:%s dates=%s/%s stops=%s price=%s",
@@ -524,6 +536,7 @@ async def _finalize_subscription(
     origin_name = await _city_name(session, origin_iata)
     date_line = _date_label(date_from, date_to).strip(" ·") or "любые даты"
     stops_line = STOPS_LABELS.get(max_stops, "") if max_stops is not None else "любые"
+    duration_line = DURATION_LABELS.get(max_duration, "без ограничений") if max_duration is not None else "без ограничений"
     price_str = f"{target_price:,} ₽".replace(",", " ")
     await _reply(
         event,
@@ -531,6 +544,7 @@ async def _finalize_subscription(
         f"✈️ {origin_name} → {dest_label}\n"
         f"📅 {date_line}\n"
         f"🔄 {stops_line}\n"
+        f"⏱ Пересадки: {duration_line}\n"
         f"💰 Уведомлять при цене ниже: {price_str}",
     )
 
