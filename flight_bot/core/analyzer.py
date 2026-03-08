@@ -6,7 +6,6 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.config import TRAVELPAYOUTS_MARKER
 from core.db.repositories.notification_repo import NotificationRepository
 from core.db.repositories.price_history_repo import PriceHistoryRepository
 
@@ -16,10 +15,11 @@ _AVIASALES_BASE = "https://www.aviasales.ru"
 
 
 def _build_ticket_url(ticket_link: str, route_key: str) -> str:
-    """Собрать ссылку в формате Aviasales: /search/MOW1503BKK1?t=...&marker=...
+    """Собрать ссылку в формате Aviasales: /search/MOW1503BKK1?t=...
 
     Открывает страницу поиска и автоматически показывает конкретный билет.
     Если ticket_link недоступен — возвращает базовую поисковую ссылку.
+    Marker не добавляется — трекинг идёт через Travelpayouts Links API.
     """
     # Пробуем взять параметры из ticket_link API
     if ticket_link:
@@ -31,11 +31,9 @@ def _build_ticket_url(ticket_link: str, route_key: str) -> str:
             if not path.startswith("search/"):
                 path = f"search/{path}"
             search_path = f"/{path}"
-            # Параметры из ticket_link + marker
             params = parse_qs(parsed.query, keep_blank_values=True)
-            params["marker"] = [TRAVELPAYOUTS_MARKER]
             query = urlencode({k: v[0] for k, v in params.items()})
-            return f"{_AVIASALES_BASE}{search_path}?{query}"
+            return f"{_AVIASALES_BASE}{search_path}?{query}" if query else f"{_AVIASALES_BASE}{search_path}"
         except Exception:
             pass
 
@@ -44,12 +42,9 @@ def _build_ticket_url(ticket_link: str, route_key: str) -> str:
         origin, dest, date_str = route_key.split(":")
         dt = datetime.strptime(date_str, "%Y-%m-%d")
         date_part = dt.strftime("%d%m")
-        return (
-            f"{_AVIASALES_BASE}/search/{origin}{date_part}{dest}1"
-            f"?marker={TRAVELPAYOUTS_MARKER}"
-        )
+        return f"{_AVIASALES_BASE}/search/{origin}{date_part}{dest}1"
     except Exception:
-        return f"{_AVIASALES_BASE}/?marker={TRAVELPAYOUTS_MARKER}"
+        return _AVIASALES_BASE
 
 
 async def check(

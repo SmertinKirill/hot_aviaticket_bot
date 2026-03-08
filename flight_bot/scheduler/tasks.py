@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import analyzer
-from core.api.travelpayouts import get_route_tickets
+from core.api.travelpayouts import get_route_tickets, shorten_link
 from core.db.base import async_session
 from core.db.models import Airport, City, Country, Subscription, User
 from core.db.repositories.notification_repo import NotificationRepository
@@ -88,6 +88,17 @@ async def _get_city_name(iata: str, session: AsyncSession) -> str:
     return name or iata
 
 
+async def _get_country_name(city_iata: str, session: AsyncSession) -> str | None:
+    """Получить русское название страны по IATA города."""
+    stmt = (
+        select(Country.name_ru)
+        .join(City, City.country_code == Country.code)
+        .where(City.iata == city_iata)
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
 def _is_quiet_time(quiet_from: int, quiet_to: int) -> bool:
     """Проверить, находимся ли в тихом периоде (московское время, UTC+3)."""
     hour = (datetime.utcnow().hour + 3) % 24
@@ -100,8 +111,11 @@ async def _send_notification(
     bot: Bot, telegram_id: int, deal: dict, session: AsyncSession
 ) -> bool:
     """Отправить уведомление о горящем билете. Возвращает True при успехе."""
+    deal["ticket_link"] = await shorten_link(deal["ticket_link"])
+
     origin_name = await _get_city_name(deal["origin_iata"], session)
     dest_name = await _get_city_name(deal["dest_iata"], session)
+    country_name = await _get_country_name(deal["dest_iata"], session)
 
     # Извлечь дату из route_key: MOW:BKK:2025-03-15
     parts = deal["route_key"].split(":")
@@ -120,7 +134,9 @@ async def _send_notification(
 
     text = (
         f"🔥 Горящий билет!\n\n"
-        f"{origin_name} → {dest_name} ({deal['dest_iata']})\n"
+        f"{origin_name} → {dest_name}"
+        + (f" ({country_name})" if country_name else "")
+        + "\n"
         f"📅 Вылет: {date_formatted}\n"
         + (f"{stops_line}\n" if stops_line else "")
         + f"💰 {deal['current_price']:,} ₽  "

@@ -4,14 +4,44 @@ import logging
 import httpx
 
 from core.api import cache
-from core.config import TRAVELPAYOUTS_TOKEN
+from core.config import TRAVELPAYOUTS_MARKER, TRAVELPAYOUTS_TOKEN, TRAVELPAYOUTS_TRS
 
 logger = logging.getLogger(__name__)
 
 GRAPHQL_URL = "https://api.travelpayouts.com/graphql/v1/query"
 REST_PRICES_URL = "https://api.travelpayouts.com/aviasales/v3/prices_for_dates"
+LINKS_URL = "https://api.travelpayouts.com/links/v1/create"
 
 _RETRY_DELAYS = [1, 2, 4]
+
+
+async def shorten_link(url: str) -> str:
+    """Конвертировать URL в короткую партнёрскую ссылку через Travelpayouts Links API.
+
+    Возвращает partner_url (напр. https://aviasales.tp.st/XXXXX?erid=...)
+    или исходный url при любой ошибке.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                LINKS_URL,
+                json={
+                    "trs": int(TRAVELPAYOUTS_TRS),
+                    "marker": int(TRAVELPAYOUTS_MARKER),
+                    "shorten": True,
+                    "links": [{"url": url}],
+                },
+                headers={"X-Access-Token": TRAVELPAYOUTS_TOKEN},
+            )
+            if not resp.is_success:
+                logger.warning("shorten_link %d: %s", resp.status_code, resp.text)
+                return url
+            data = resp.json()
+        partner_url = data["result"]["links"][0]["partner_url"]
+        return f"{partner_url}?sub_id=tg_bot"
+    except Exception as e:
+        logger.warning("shorten_link ошибка, fallback на исходный URL: %s", e)
+    return url
 
 
 async def get_cheap_tickets(origin_iata: str) -> list[dict]:
