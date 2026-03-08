@@ -426,7 +426,7 @@ async def cb_duration_select(callback: CallbackQuery, state: FSMContext):
 
     text = (
         f"Сколько максимум вы готовы потратить на билет? (₽):\n"
-        f"(например: 30000)"
+        f"(например: 7500)"
         f"{price_line}"
     )
     await state.set_state(SubscribeStates.waiting_for_target_price)
