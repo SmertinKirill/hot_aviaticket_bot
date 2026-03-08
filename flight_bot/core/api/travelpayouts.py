@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 GRAPHQL_URL = "https://api.travelpayouts.com/graphql/v1/query"
 REST_PRICES_URL = "https://api.travelpayouts.com/aviasales/v3/prices_for_dates"
 LINKS_URL = "https://api.travelpayouts.com/links/v1/create"
+STATS_URL = "https://api.travelpayouts.com/statistics/v1/execute_query"
 
 _RETRY_DELAYS = [1, 2, 4]
 
@@ -187,6 +188,50 @@ async def get_route_tickets(
             "get_route_tickets %s→%s: %s", origin_iata, destination_iata, e
         )
         return []
+
+
+async def get_partner_stats(date_from: str, date_to: str) -> dict | None:
+    """Получить статистику партнёра за период.
+
+    date_from / date_to — строки YYYY-MM-DD.
+    Возвращает dict с ключами clicks, bookings, paid_eur, processing_eur
+    или None при ошибке.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                STATS_URL,
+                json={
+                    "fields": [
+                        "redirects_count",
+                        "processing_actions_count",
+                        "paid_actions_count",
+                        "paid_profit_eur_sum",
+                        "processing_profit_eur_sum",
+                    ],
+                    "filters": [
+                        {"field": "date", "op": "ge", "value": date_from},
+                        {"field": "date", "op": "le", "value": date_to},
+                    ],
+                },
+                headers={"X-Access-Token": TRAVELPAYOUTS_TOKEN},
+            )
+            if not resp.is_success:
+                logger.warning("partner_stats %d: %s", resp.status_code, resp.text)
+                return None
+            data = resp.json()
+
+        rows = data if isinstance(data, list) else data.get("results", data.get("data", []))
+        row = rows[0] if rows and isinstance(rows[0], dict) else {}
+        return {
+            "clicks": int(row.get("redirects_count") or 0),
+            "bookings": int((row.get("processing_actions_count") or 0) + (row.get("paid_actions_count") or 0)),
+            "paid_eur": round(float(row.get("paid_profit_eur_sum") or 0), 2),
+            "processing_eur": round(float(row.get("processing_profit_eur_sum") or 0), 2),
+        }
+    except Exception as e:
+        logger.warning("partner_stats ошибка: %s", e)
+        return None
 
 
 async def get_global_min_price(

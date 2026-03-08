@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import analyzer
-from core.api.travelpayouts import get_route_tickets, shorten_link
+from core.api.travelpayouts import get_partner_stats, get_route_tickets, shorten_link
 from core.db.base import async_session
 from core.db.models import Airport, City, Country, Notification, Subscription, User
 from core.config import ADMIN_IDS
@@ -374,36 +374,58 @@ async def clean_old_prices() -> None:
         logger.error("Ошибка retention job: %s", e)
 
 
+async def build_stats_text(session: AsyncSession) -> str:
+    """Собрать текст недельной статистики."""
+    now = datetime.utcnow()
+    week_ago = now - timedelta(days=7)
+
+    active_users = (await session.execute(
+        select(func.count()).select_from(User).where(User.is_active == True)  # noqa: E712
+    )).scalar() or 0
+
+    new_users = (await session.execute(
+        select(func.count()).select_from(User).where(User.created_at >= week_ago)
+    )).scalar() or 0
+
+    notifications_sent = (await session.execute(
+        select(func.count()).select_from(Notification).where(Notification.sent_at >= week_ago)
+    )).scalar() or 0
+
+    active_subs = (await session.execute(
+        select(func.count()).select_from(Subscription).where(Subscription.is_active == True)  # noqa: E712
+    )).scalar() or 0
+
+    text = (
+        "📊 Статистика за неделю\n\n"
+        f"👥 Активных пользователей: {active_users}\n"
+        f"🆕 Новых за неделю: {new_users}\n"
+        f"📬 Уведомлений отправлено: {notifications_sent}\n"
+        f"📋 Активных подписок: {active_subs}"
+    )
+
+    tp = await get_partner_stats(
+        date_from=week_ago.strftime("%Y-%m-%d"),
+        date_to=now.strftime("%Y-%m-%d"),
+    )
+    if tp is not None:
+        text += (
+            "\n\n✈️ Travelpayouts\n"
+            f"🖱 Переходов: {tp['clicks']}\n"
+            f"🎟 Бронирований: {tp['bookings']}\n"
+            f"💶 Подтверждённый доход: {tp['paid_eur']} €\n"
+            f"⏳ В обработке: {tp['processing_eur']} €"
+        )
+
+    return text
+
+
 async def send_weekly_stats(bot: Bot) -> None:
     """Отправить недельную статистику всем администраторам."""
     if not ADMIN_IDS:
         return
     try:
-        week_ago = datetime.utcnow() - timedelta(days=7)
         async with async_session() as session:
-            active_users = (await session.execute(
-                select(func.count()).select_from(User).where(User.is_active == True)  # noqa: E712
-            )).scalar() or 0
-
-            new_users = (await session.execute(
-                select(func.count()).select_from(User).where(User.created_at >= week_ago)
-            )).scalar() or 0
-
-            notifications_sent = (await session.execute(
-                select(func.count()).select_from(Notification).where(Notification.sent_at >= week_ago)
-            )).scalar() or 0
-
-            active_subs = (await session.execute(
-                select(func.count()).select_from(Subscription).where(Subscription.is_active == True)  # noqa: E712
-            )).scalar() or 0
-
-        text = (
-            "📊 Статистика за неделю\n\n"
-            f"👥 Активных пользователей: {active_users}\n"
-            f"🆕 Новых за неделю: {new_users}\n"
-            f"📬 Уведомлений отправлено: {notifications_sent}\n"
-            f"📋 Активных подписок: {active_subs}"
-        )
+            text = await build_stats_text(session)
         for admin_id in ADMIN_IDS:
             try:
                 await bot.send_message(admin_id, text)
