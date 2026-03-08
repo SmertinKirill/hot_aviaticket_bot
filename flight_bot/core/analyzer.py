@@ -87,9 +87,10 @@ async def check(
     # и только если цена стала ещё ниже чем при прошлом уведомлении
     last_notif = await notif_repo.get_last(subscription.id, route_key)
     if last_notif:
-        if datetime.utcnow() - last_notif.sent_at < timedelta(hours=24):
+        elapsed = datetime.utcnow() - last_notif.sent_at
+        if elapsed < timedelta(hours=24):
             return None
-        if current_price >= last_notif.price:
+        if current_price >= last_notif.price and elapsed < timedelta(days=7):
             return None
 
     return {
@@ -100,4 +101,5 @@ async def check(
         "current_price": current_price,
         "target_price": target_price,
         "ticket_link": _build_ticket_url(ticket_link, route_key),
+        "prev_price": last_notif.price if last_notif else None,
     }

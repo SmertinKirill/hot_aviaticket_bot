@@ -133,6 +133,14 @@ async def _send_notification(
     else:
         stops_line = ""
 
+    prev_price = deal.get("prev_price")
+    if prev_price is not None and prev_price > deal["current_price"]:
+        drop = prev_price - deal["current_price"]
+        drop_line = f"📉 Дешевле на {drop:,} ₽ с прошлого уведомления\n"
+    else:
+        drop = deal["target_price"] - deal["current_price"]
+        drop_line = f"📉 Дешевле на {drop:,} ₽ от установленной вами цены\n"
+
     text = (
         f"🔥 Горящий билет!\n\n"
         f"{origin_name} → {dest_name}"
@@ -141,8 +149,9 @@ async def _send_notification(
         f"📅 Вылет: {date_formatted}\n"
         + (f"{stops_line}\n" if stops_line else "")
         + f"💰 {deal['current_price']:,} ₽  "
-        f"(ваш порог: {deal['target_price']:,} ₽)\n\n"
-        f"⚡ Цена может измениться — бронируйте быстро"
+        f"(ваша цена: {deal['target_price']:,} ₽)\n"
+        + drop_line
+        + f"\n⚡ Цена может измениться — бронируйте быстро"
     ).replace(",", " ")
 
     keyboard = InlineKeyboardMarkup(
