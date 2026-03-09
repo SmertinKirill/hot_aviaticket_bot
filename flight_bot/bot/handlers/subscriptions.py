@@ -192,16 +192,17 @@ async def cb_region_select(callback: CallbackQuery, state: FSMContext, session: 
     await state.update_data(pending_dest_type="region", pending_dest_code=region)
 
     country_codes = _REGIONS.get(region, [])
-    countries_text = ""
     if country_codes:
         stmt = select(Country.name_ru).where(Country.code.in_(country_codes)).order_by(Country.name_ru)
         result = await session.execute(stmt)
         names = result.scalars().all()
         if names:
-            countries_text = "\n\n🌍 Страны: " + ", ".join(names)
+            await callback.message.answer(
+                f"🌍 Страны региона {region}:\n" + ", ".join(names)
+            )
 
     await callback.message.edit_text(
-        f"📍 Регион: {region}{countries_text}\n\nВыберите период вылета:",
+        "Выберите период вылета:",
         reply_markup=date_type_select(),
     )
 
