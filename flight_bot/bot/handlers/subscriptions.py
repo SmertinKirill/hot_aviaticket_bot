@@ -8,8 +8,8 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
-    CallbackQuery, KeyboardButton, Message,
-    ReplyKeyboardMarkup, ReplyKeyboardRemove,
+    CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup,
+    KeyboardButton, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove,
 )
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -396,11 +396,16 @@ async def process_date_input(message: Message, state: FSMContext):
 async def cb_stops_select(callback: CallbackQuery, state: FSMContext):
     max_stops = int(callback.data.split(":")[1])
     await callback.answer()
-    await state.update_data(max_stops=max_stops)
-    await callback.message.edit_text(
-        "Максимальное время пересадок:",
-        reply_markup=duration_select(),
-    )
+    await state.update_data(max_stops=max_stops, max_duration=None)
+
+    if max_stops == 0:
+        # Прямой рейс — пересадок нет, сразу к цене
+        await _ask_price(callback, state)
+    else:
+        await callback.message.edit_text(
+            "Максимальное время пересадок:",
+            reply_markup=duration_select(),
+        )
 
 
 @router.callback_query(F.data.startswith("duration:"))
@@ -409,7 +414,10 @@ async def cb_duration_select(callback: CallbackQuery, state: FSMContext):
     max_duration = value if value > 0 else None
     await callback.answer()
     await state.update_data(max_duration=max_duration)
+    await _ask_price(callback, state)
 
+
+async def _ask_price(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     origin_iata = data.get("origin_iata")
     dest_type = data.get("pending_dest_type")
@@ -538,6 +546,9 @@ async def _finalize_subscription(
     stops_line = STOPS_LABELS.get(max_stops, "") if max_stops is not None else "любые"
     duration_line = DURATION_LABELS.get(max_duration, "без ограничений") if max_duration is not None else "без ограничений"
     price_str = f"{target_price:,} ₽".replace(",", " ")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="➕ Создать ещё одну подписку", callback_data="subscribe")
+    ]])
     await _reply(
         event,
         f"{action_label}\n\n"
@@ -546,14 +557,15 @@ async def _finalize_subscription(
         f"🔄 {stops_line}\n"
         f"⏱ Пересадки: {duration_line}\n"
         f"💰 Уведомлять при цене ниже: {price_str}",
+        reply_markup=kb,
     )
 
 
-async def _reply(event: Message | CallbackQuery, text: str) -> None:
+async def _reply(event: Message | CallbackQuery, text: str, reply_markup=None) -> None:
     if isinstance(event, CallbackQuery):
-        await event.message.edit_text(text)
+        await event.message.edit_text(text, reply_markup=reply_markup)
     else:
-        await event.answer(text)
+        await event.answer(text, reply_markup=reply_markup)
 
 
 # --- Список подписок ---
@@ -728,9 +740,10 @@ def _date_label(date_from: date | None, date_to: date | None) -> str:
 
 
 def _parse_single_date(s: str) -> date | None:
-    for fmt in ["%d.%m.%Y", "%d/%m/%Y"]:
+    s = s.strip()
+    for fmt in ["%d.%m.%Y", "%d/%m/%Y", "%d.%m.%y", "%d/%m/%y"]:
         try:
-            return datetime.strptime(s.strip(), fmt).date()
+            return datetime.strptime(s, fmt).date()
         except ValueError:
             continue
     return None
