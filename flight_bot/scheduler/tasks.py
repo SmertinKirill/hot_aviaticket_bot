@@ -263,7 +263,7 @@ async def monitor_cycle(bot: Bot) -> None:
                         key = (cc, month_key)
                         if key not in seen_country_months:
                             cc_tickets = await get_route_tickets(origin, cc, departure_month=month_key)
-                            await asyncio.sleep(0.5)
+                            await asyncio.sleep(0.1)
                             seen_country_months[key] = cc_tickets
                         extra_tickets.extend(seen_country_months[key])
 
