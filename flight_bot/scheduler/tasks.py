@@ -200,6 +200,7 @@ async def _send_notification(
 
 async def monitor_cycle(bot: Bot) -> None:
     """Основной цикл мониторинга цен."""
+    _started_at = datetime.utcnow()
     try:
         logger.info("Цикл мониторинга: начало")
 
@@ -368,9 +369,11 @@ async def monitor_cycle(bot: Bot) -> None:
                                 savings_pct,
                             )
 
+            elapsed = (datetime.utcnow() - _started_at).total_seconds()
             logger.info(
-                "Цикл мониторинга: завершён. "
+                "Цикл мониторинга: завершён за %.1f сек. "
                 "Проверено маршрутов: %d, найдено горящих: %d",
+                elapsed,
                 total_routes,
                 total_deals,
             )
