@@ -73,6 +73,12 @@ def _fmt_user(tg_user) -> str:
     return f"@{tg_user.username}" if tg_user.username else f"id={tg_user.id}"
 
 
+def _back_kb(cb: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="← Назад", callback_data=cb)
+    ]])
+
+
 def _origin_reply_kb() -> ReplyKeyboardMarkup:
     buttons = [
         [KeyboardButton(text=city) for city in _POPULAR_ORIGINS[:3]],
@@ -209,7 +215,9 @@ async def cb_region_select(callback: CallbackQuery, state: FSMContext, session: 
 @router.callback_query(F.data == "sub_country")
 async def cb_sub_country(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
-    await callback.message.edit_text("Введите название страны:")
+    await callback.message.edit_text(
+        "Введите название страны:", reply_markup=_back_kb("sub_back:dest_type")
+    )
     await state.set_state(SubscribeStates.waiting_for_country_input)
 
 
@@ -271,7 +279,9 @@ async def cb_country_pick(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "sub_city")
 async def cb_sub_city(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
-    await callback.message.edit_text("Введите название города назначения:")
+    await callback.message.edit_text(
+        "Введите название города назначения:", reply_markup=_back_kb("sub_back:dest_type")
+    )
     await state.set_state(SubscribeStates.waiting_for_city_input)
 
 
@@ -338,7 +348,8 @@ async def cb_date_type(callback: CallbackQuery, state: FSMContext):
         await state.update_data(date_input_type="specific")
         await state.set_state(SubscribeStates.waiting_for_date_input)
         await callback.message.edit_text(
-            "Введите дату в формате ДД.ММ.ГГГГ:\n(например: 15.04.2026)"
+            "Введите дату в формате ДД.ММ.ГГГГ:\n(например: 15.04.2026)",
+            reply_markup=_back_kb("sub_back:date_type"),
         )
         return
 
@@ -347,7 +358,8 @@ async def cb_date_type(callback: CallbackQuery, state: FSMContext):
         await state.set_state(SubscribeStates.waiting_for_date_input)
         await callback.message.edit_text(
             "Введите диапазон в формате ДД.ММ.ГГГГ - ДД.ММ.ГГГГ:\n"
-            "(например: 01.04.2026 - 30.04.2026)"
+            "(например: 01.04.2026 - 30.04.2026)",
+            reply_markup=_back_kb("sub_back:date_type"),
         )
         return
 
@@ -446,8 +458,10 @@ async def _ask_price(callback: CallbackQuery, state: FSMContext) -> None:
         f"(например: 7500)"
         f"{price_line}"
     )
+    max_stops = data.get("max_stops")
+    back_cb = "sub_back:stops" if max_stops == 0 else "sub_back:duration"
     await state.set_state(SubscribeStates.waiting_for_target_price)
-    await callback.message.edit_text(text)
+    await callback.message.edit_text(text, reply_markup=_back_kb(back_cb))
 
 
 @router.message(SubscribeStates.waiting_for_target_price, ~F.text.startswith("/"))
@@ -575,6 +589,68 @@ async def _reply(event: Message | CallbackQuery, text: str, reply_markup=None) -
         await event.message.edit_text(text, reply_markup=reply_markup)
     else:
         await event.answer(text, reply_markup=reply_markup)
+
+
+# --- Навигация назад ---
+
+@router.callback_query(F.data.startswith("sub_back:"))
+async def cb_sub_back(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    target = callback.data.split(":", 1)[1]
+    await callback.answer()
+    data = await state.get_data()
+
+    if target == "origin":
+        # Назад к вводу города вылета
+        await state.update_data(origin_iata=None)
+        await state.set_state(SubscribeStates.waiting_for_origin_city)
+        await callback.message.edit_text("Изменение города вылета:")
+        await callback.message.answer(
+            "Введите полное название города вылета на русском:",
+            reply_markup=_origin_reply_kb(),
+        )
+
+    elif target == "dest_type":
+        # Назад к выбору типа направления
+        await state.set_state(None)
+        await callback.message.edit_text("Куда летим?", reply_markup=subscribe_type())
+
+    elif target == "dest_selection":
+        # Назад из выбора даты — возвращаемся к нужному шагу в зависимости от типа направления
+        dest_type = data.get("pending_dest_type")
+        await state.set_state(None)
+        if dest_type == "region":
+            await callback.message.edit_text("Выберите регион:", reply_markup=region_select())
+        elif dest_type == "country":
+            await state.set_state(SubscribeStates.waiting_for_country_input)
+            await callback.message.edit_text(
+                "Введите название страны:", reply_markup=_back_kb("sub_back:dest_type")
+            )
+        elif dest_type == "city":
+            await state.set_state(SubscribeStates.waiting_for_city_input)
+            await callback.message.edit_text(
+                "Введите название города назначения:", reply_markup=_back_kb("sub_back:dest_type")
+            )
+        else:
+            await callback.message.edit_text("Куда летим?", reply_markup=subscribe_type())
+
+    elif target == "date_type":
+        # Назад к выбору периода вылета
+        await state.set_state(None)
+        await callback.message.edit_text(
+            "Выберите период вылета:", reply_markup=date_type_select()
+        )
+
+    elif target == "stops":
+        # Назад к выбору пересадок
+        await state.set_state(None)
+        await callback.message.edit_text("Количество пересадок:", reply_markup=stops_select())
+
+    elif target == "duration":
+        # Назад к выбору времени пересадки
+        await state.set_state(None)
+        await callback.message.edit_text(
+            "Максимальное время пересадок:", reply_markup=duration_select()
+        )
 
 
 # --- Список подписок ---

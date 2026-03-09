@@ -27,7 +27,8 @@ def subscribe_type() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🌏 Регион", callback_data="sub_region"),
                 InlineKeyboardButton(text="🏳 Страна", callback_data="sub_country"),
                 InlineKeyboardButton(text="🏙 Город", callback_data="sub_city"),
-            ]
+            ],
+            [InlineKeyboardButton(text="← Назад", callback_data="sub_back:origin")],
         ]
     )
 
@@ -44,6 +45,7 @@ def region_select() -> InlineKeyboardMarkup:
                     callback_data="region:ОАЭ и Ближний Восток",
                 )
             ],
+            [InlineKeyboardButton(text="← Назад", callback_data="sub_back:dest_type")],
         ]
     )
 
@@ -100,6 +102,7 @@ def stops_select() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="✈️ Только прямые", callback_data="stops:0")],
             [InlineKeyboardButton(text="1️⃣ Макс. 1 пересадка", callback_data="stops:1")],
             [InlineKeyboardButton(text="2️⃣ Макс. 2 пересадки", callback_data="stops:2")],
+            [InlineKeyboardButton(text="← Назад", callback_data="sub_back:date_type")],
         ]
     )
 
@@ -112,11 +115,12 @@ def duration_select() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🕑 До 18 часов", callback_data="duration:1080")],
             [InlineKeyboardButton(text="🕒 До 24 часов", callback_data="duration:1440")],
             [InlineKeyboardButton(text="♾ Без ограничений", callback_data="duration:0")],
+            [InlineKeyboardButton(text="← Назад", callback_data="sub_back:stops")],
         ]
     )
 
 
-def date_type_select() -> InlineKeyboardMarkup:
+def date_type_select(back_cb: str = "sub_back:dest_selection") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -126,6 +130,7 @@ def date_type_select() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="🗓 Месяц", callback_data="date_type:month"),
             ],
+            [InlineKeyboardButton(text="← Назад", callback_data=back_cb)],
         ]
     )
 
@@ -145,6 +150,7 @@ def month_select() -> InlineKeyboardMarkup:
             row = []
     if row:
         buttons.append(row)
+    buttons.append([InlineKeyboardButton(text="← Назад", callback_data="sub_back:date_type")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
