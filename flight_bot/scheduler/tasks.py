@@ -239,7 +239,7 @@ async def monitor_cycle(bot: Bot) -> None:
                                 sub.date_from.isoformat(),
                                 sub.date_to.isoformat(),
                             )
-                            await asyncio.sleep(0.5)
+                            await asyncio.sleep(0.1)
                             seen_routes[key] = route_t
                         extra_tickets.extend(seen_routes[key])
 
