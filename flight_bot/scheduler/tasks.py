@@ -327,12 +327,18 @@ async def monitor_cycle(bot: Bot) -> None:
                         if deal is not None:
                             deal["stops"] = stops_lookup.get(deal["route_key"])
                             deal["layover"] = layover_lookup.get(deal["route_key"])
-                            # Проверяем пересадки у конкретного тикета из deal —
+                            # Проверяем пересадки и время пересадки у конкретного тикета из deal —
                             # analyzer мог вернуть более дешёвый рейс с лишними пересадками
                             if (
                                 sub.max_stops is not None
                                 and deal["stops"] is not None
                                 and deal["stops"] > sub.max_stops
+                            ):
+                                continue
+                            if (
+                                sub.max_duration is not None
+                                and deal["layover"] is not None
+                                and deal["layover"] > sub.max_duration
                             ):
                                 continue
                             total_deals += 1
