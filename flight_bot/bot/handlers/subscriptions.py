@@ -123,7 +123,7 @@ async def process_origin_city_input(
 
     if not cities:
         logger.info("%s: город вылета не найден, запрос=%r", _fmt_user(message.from_user), query)
-        await message.answer("Город не найден. Попробуйте ещё раз:")
+        await message.answer("Город не найден. Попробуйте ещё раз:", reply_markup=_origin_reply_kb())
         return
 
     remove_kb = ReplyKeyboardRemove()
@@ -182,7 +182,7 @@ async def cb_sub_region(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("region:"))
-async def cb_region_select(callback: CallbackQuery, state: FSMContext):
+async def cb_region_select(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     region = callback.data.split(":", 1)[1]
     await callback.answer()
     data = await state.get_data()
@@ -190,8 +190,19 @@ async def cb_region_select(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text("Сессия истекла. Начните заново с /subscribe")
         return
     await state.update_data(pending_dest_type="region", pending_dest_code=region)
+
+    country_codes = _REGIONS.get(region, [])
+    countries_text = ""
+    if country_codes:
+        stmt = select(Country.name_ru).where(Country.code.in_(country_codes)).order_by(Country.name_ru)
+        result = await session.execute(stmt)
+        names = result.scalars().all()
+        if names:
+            countries_text = "\n\n🌍 Страны: " + ", ".join(names)
+
     await callback.message.edit_text(
-        "Выберите период вылета:", reply_markup=date_type_select()
+        f"📍 Регион: {region}{countries_text}\n\nВыберите период вылета:",
+        reply_markup=date_type_select(),
     )
 
 
@@ -449,7 +460,7 @@ async def process_target_price(
     try:
         price = int(text)
     except ValueError:
-        await message.answer("Введите целое число. Например: 30000")
+        await message.answer("Введите целое число. Например: 7500")
         return
 
     if price <= 0:

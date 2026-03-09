@@ -4,7 +4,8 @@ import logging
 
 from aiogram import Router
 from aiogram.filters import CommandStart
-from aiogram.types import Message
+from aiogram.fsm.context import FSMContext
+from aiogram.types import Message, ReplyKeyboardRemove
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +18,13 @@ logger = logging.getLogger(__name__)
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, session: AsyncSession):
+async def cmd_start(message: Message, session: AsyncSession, state: FSMContext):
+    await state.clear()
+
+    # Убираем reply-клавиатуру если она осталась от предыдущего шага
+    tmp = await message.answer("…", reply_markup=ReplyKeyboardRemove())
+    await tmp.delete()
+
     user_repo = UserRepository(session)
     user = await user_repo.get_by_telegram_id(message.from_user.id)
 

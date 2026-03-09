@@ -4,7 +4,8 @@ import logging
 
 from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyKeyboardRemove
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.inline import quiet_hours_menu
@@ -17,7 +18,10 @@ logger = logging.getLogger(__name__)
 
 
 @router.message(Command("settings"))
-async def cmd_settings(message: Message, session: AsyncSession):
+async def cmd_settings(message: Message, session: AsyncSession, state: FSMContext):
+    await state.clear()
+    tmp = await message.answer("…", reply_markup=ReplyKeyboardRemove())
+    await tmp.delete()
     await _show_settings(message, session)
 
 
