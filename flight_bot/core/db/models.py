@@ -115,21 +115,6 @@ class Subscription(Base):
     )
 
 
-class PriceHistory(Base):
-    __tablename__ = "price_history"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    route_key: Mapped[str] = mapped_column(String, nullable=False)
-    price: Mapped[int] = mapped_column(Integer, nullable=False)
-    ticket_link: Mapped[str] = mapped_column(String, nullable=False)
-    found_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now()
-    )
-
-    __table_args__ = (
-        Index("ix_price_history_route_found", "route_key", "found_at"),
-    )
-
 
 class SupportTicket(Base):
     __tablename__ = "support_tickets"

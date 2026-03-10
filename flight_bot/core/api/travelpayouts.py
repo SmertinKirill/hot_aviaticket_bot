@@ -177,7 +177,7 @@ async def get_route_tickets(
                 "destination_iata": r.get("destination", destination_iata),
                 "price": int(r["price"]),
                 "departure_at": (r.get("departure_at") or "")[:10],
-                "stops": r.get("transfers"),
+                "stops": r.get("transfers") if r.get("transfers") is not None else 0,
                 "duration": r.get("duration"),     # минуты, полное время (полёт + пересадки)
                 "duration_to": r.get("duration_to"),  # минуты, только время в воздухе
                 "ticket_link": link,

@@ -16,7 +16,6 @@ from core.db.base import async_session
 from core.db.models import Airport, City, Country, Notification, Subscription, User
 from core.config import ADMIN_IDS
 from core.db.repositories.notification_repo import NotificationRepository
-from core.db.repositories.price_history_repo import PriceHistoryRepository
 from core.db.repositories.subscription_repo import SubscriptionRepository
 
 logger = logging.getLogger(__name__)
@@ -206,7 +205,6 @@ async def monitor_cycle(bot: Bot) -> None:
 
         async with async_session() as session:
             sub_repo = SubscriptionRepository(session)
-            price_repo = PriceHistoryRepository(session)
             notif_repo = NotificationRepository(session)
 
             all_subs = await sub_repo.get_all_active()
@@ -291,84 +289,56 @@ async def monitor_cycle(bot: Bot) -> None:
 
                 all_tickets = extra_tickets
 
-                # Записать в price_history + собрать lookup stops/duration по route_key
-                stops_lookup: dict[str, int | None] = {}
-                layover_lookup: dict[str, int | None] = {}
-                for ticket in all_tickets:
-                    dest = ticket["destination_iata"]
-                    departure = ticket["departure_at"]
-                    if not dest or not departure:
-                        continue
-                    route_key = f"{origin}:{dest}:{departure}"
-                    stops_lookup[route_key] = ticket.get("stops")
-                    duration = ticket.get("duration")
-                    duration_to = ticket.get("duration_to")
-                    if duration is not None and duration_to is not None:
-                        layover_lookup[route_key] = duration - duration_to
-                    else:
-                        layover_lookup[route_key] = None
-                    await price_repo.add(
-                        route_key=route_key,
-                        price=ticket["price"],
-                        ticket_link=ticket["ticket_link"],
-                    )
-
                 # Проверить подписки
                 for sub in subs:
                     destinations = await resolve_destinations(sub, session)
-                    # Фильтрация тикетов по дате, пересадкам и времени в пути
+
                     def _ticket_matches(t: dict) -> bool:
                         if sub.date_from is not None:
                             d = _parse_ticket_date(t["departure_at"])
                             if not (sub.date_from <= d <= sub.date_to):
                                 return False
                         if sub.max_stops is not None:
-                            stops = t.get("stops")
-                            if stops is not None and stops > sub.max_stops:
+                            s = t.get("stops")
+                            if s is None or s > sub.max_stops:
                                 return False
                         if sub.max_duration is not None:
-                            duration = t.get("duration")
-                            duration_to = t.get("duration_to")
-                            if duration is not None and duration_to is not None:
-                                layover = duration - duration_to
-                                if layover > sub.max_duration:
+                            dur = t.get("duration")
+                            dur_to = t.get("duration_to")
+                            if dur is not None and dur_to is not None:
+                                if (dur - dur_to) > sub.max_duration:
                                     return False
                         return True
 
-                    sub_available = {
-                        t["destination_iata"] for t in all_tickets
-                        if _ticket_matches(t)
-                    }
-                    destinations = [
-                        d for d in destinations if d in sub_available
-                    ]
-
                     for dest in destinations:
+                        # Находим самый дешёвый подходящий тикет прямо в памяти
+                        matching = [
+                            t for t in all_tickets
+                            if t["destination_iata"] == dest and _ticket_matches(t)
+                        ]
+                        if not matching:
+                            continue
+
+                        best = min(matching, key=lambda t: t["price"])
+                        route_key = f"{origin}:{dest}:{best['departure_at']}"
+                        dur = best.get("duration")
+                        dur_to = best.get("duration_to")
+                        layover = (dur - dur_to) if dur is not None and dur_to is not None else None
+
                         total_routes += 1
-                        deal = await analyzer.check(sub, origin, dest, session)
+                        deal = await analyzer.check(
+                            sub, origin, dest,
+                            best["price"], best["ticket_link"], route_key,
+                            session,
+                        )
                         if deal is not None:
-                            deal["stops"] = stops_lookup.get(deal["route_key"])
-                            deal["layover"] = layover_lookup.get(deal["route_key"])
-                            # Проверяем пересадки и время пересадки у конкретного тикета из deal —
-                            # analyzer мог вернуть более дешёвый рейс с лишними пересадками
-                            if (
-                                sub.max_stops is not None
-                                and deal["stops"] is not None
-                                and deal["stops"] > sub.max_stops
-                            ):
-                                continue
-                            if (
-                                sub.max_duration is not None
-                                and deal["layover"] is not None
-                                and deal["layover"] > sub.max_duration
-                            ):
-                                continue
+                            deal["stops"] = best.get("stops")
+                            deal["layover"] = layover
                             total_deals += 1
                             savings_pct = round(
                                 (deal["target_price"] - deal["current_price"])
                                 / deal["target_price"] * 100
                             ) if deal["target_price"] > 0 else 0
-                            # Отправить — записываем в БД только при успехе
                             sent = await _send_notification(
                                 bot, sub.user.telegram_id, deal, session
                             )
@@ -419,13 +389,9 @@ def _parse_ticket_date(departure_at: str) -> date:
 
 
 async def clean_old_prices() -> None:
-    """Удаление старых записей price_history + деактивация устаревших подписок."""
+    """Деактивация устаревших подписок (retention job)."""
     try:
         async with async_session() as session:
-            price_repo = PriceHistoryRepository(session)
-            deleted = await price_repo.delete_older_than(weeks=12)
-            logger.info("Retention: удалено %d записей старше 12 недель", deleted)
-
             # Деактивируем подписки, у которых date_to уже прошла
             today = date.today()
             result = await session.execute(

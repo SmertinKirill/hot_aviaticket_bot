@@ -7,7 +7,6 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.db.repositories.notification_repo import NotificationRepository
-from core.db.repositories.price_history_repo import PriceHistoryRepository
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +20,9 @@ def _build_ticket_url(ticket_link: str, route_key: str) -> str:
     Если ticket_link недоступен — возвращает базовую поисковую ссылку.
     Marker не добавляется — трекинг идёт через Travelpayouts Links API.
     """
-    # Пробуем взять параметры из ticket_link API
     if ticket_link:
         try:
             parsed = urlparse(ticket_link)
-            # GraphQL: /MOW1703BKK1 → /search/MOW1703BKK1
-            # REST:    /search/MOW1703BKK1 → /search/MOW1703BKK1 (уже есть)
             path = parsed.path.lstrip("/")
             if not path.startswith("search/"):
                 path = f"search/{path}"
@@ -37,7 +33,6 @@ def _build_ticket_url(ticket_link: str, route_key: str) -> str:
         except Exception:
             pass
 
-    # Fallback: строим поисковую ссылку из route_key
     try:
         origin, dest, date_str = route_key.split(":")
         dt = datetime.strptime(date_str, "%Y-%m-%d")
@@ -51,6 +46,9 @@ async def check(
     subscription,
     origin_iata: str,
     dest_iata: str,
+    current_price: int,
+    ticket_link: str,
+    route_key: str,
     session: AsyncSession,
 ) -> dict | None:
     """
@@ -63,28 +61,10 @@ async def check(
     if not target_price or target_price <= 0:
         return None
 
-    price_repo = PriceHistoryRepository(session)
-    notif_repo = NotificationRepository(session)
-
-    prefix = f"{origin_iata}:{dest_iata}:"
-    latest = await price_repo.get_latest_by_prefix(
-        prefix,
-        date_from=subscription.date_from,
-        date_to=subscription.date_to,
-    )
-
-    if latest is None:
-        return None
-
-    route_key = latest.route_key
-    current_price = latest.price
-    ticket_link = latest.ticket_link
-
     if current_price > target_price:
         return None
 
-    # Антиспам: не слать чаще раза в сутки по одному маршруту,
-    # и только если цена стала ещё ниже чем при прошлом уведомлении
+    notif_repo = NotificationRepository(session)
     last_notif = await notif_repo.get_last(subscription.id, route_key)
     if last_notif:
         elapsed = datetime.utcnow() - last_notif.sent_at
