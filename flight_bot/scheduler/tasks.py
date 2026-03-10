@@ -373,12 +373,19 @@ async def monitor_cycle(bot: Bot) -> None:
                                 bot, sub.user.telegram_id, deal, session
                             )
                             if sent:
+                                parts = deal["route_key"].split(":")
                                 await notif_repo.create(
                                     subscription_id=deal["subscription_id"],
                                     route_key=deal["route_key"],
                                     price=deal["current_price"],
                                     avg_price=deal["target_price"],
                                     discount_pct=savings_pct,
+                                    telegram_id=sub.user.telegram_id,
+                                    origin_iata=deal["origin_iata"],
+                                    dest_iata=deal["dest_iata"],
+                                    departure_at=parts[2] if len(parts) >= 3 else None,
+                                    stops=deal.get("stops"),
+                                    ticket_link=deal.get("ticket_link"),
                                 )
                             logger.info(
                                 "Уведомление: user_id=%d, sub_id=%d, "

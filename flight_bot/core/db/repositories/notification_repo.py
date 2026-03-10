@@ -30,6 +30,12 @@ class NotificationRepository:
         price: int,
         avg_price: int,
         discount_pct: int,
+        telegram_id: int | None = None,
+        origin_iata: str | None = None,
+        dest_iata: str | None = None,
+        departure_at: str | None = None,
+        stops: int | None = None,
+        ticket_link: str | None = None,
     ) -> Notification:
         notif = Notification(
             subscription_id=subscription_id,
@@ -37,6 +43,12 @@ class NotificationRepository:
             price=price,
             avg_price=avg_price,
             discount_pct=discount_pct,
+            telegram_id=telegram_id,
+            origin_iata=origin_iata,
+            dest_iata=dest_iata,
+            departure_at=departure_at,
+            stops=stops,
+            ticket_link=ticket_link,
         )
         self.session.add(notif)
         await self.session.commit()

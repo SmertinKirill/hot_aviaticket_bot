@@ -155,9 +155,14 @@ class Notification(Base):
     price: Mapped[int] = mapped_column(Integer, nullable=False)
     avg_price: Mapped[int] = mapped_column(Integer, nullable=False)
     discount_pct: Mapped[int] = mapped_column(Integer, nullable=False)
-    sent_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now()
-    )
+    sent_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # Лог-поля
+    telegram_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    origin_iata: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    dest_iata: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    departure_at: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    stops: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ticket_link: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         Index(
