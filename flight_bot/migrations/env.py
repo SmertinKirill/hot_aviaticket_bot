@@ -11,7 +11,6 @@ from core.db.models import (  # noqa: F401  — нужен для автоген
     City,
     Country,
     Notification,
-    PriceHistory,
     Subscription,
     User,
 )
