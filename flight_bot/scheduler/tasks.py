@@ -225,48 +225,69 @@ async def monitor_cycle(bot: Bot) -> None:
             total_routes = 0
             total_deals = 0
 
+            # Семафор: не более 10 параллельных запросов (лимит API 600 req/min)
+            _sem = asyncio.Semaphore(10)
+
+            async def _fetch_route(o: str, dest: str, df: str | None, dt: str | None) -> list[dict]:
+                async with _sem:
+                    return await get_route_tickets(o, dest, df, dt)
+
+            async def _fetch_country(o: str, cc: str, month: str) -> list[dict]:
+                async with _sem:
+                    return await get_route_tickets(o, cc, departure_month=month)
+
             for origin, subs in origin_subs.items():
-                # City-подписки: запрашиваем конкретный маршрут с фильтром дат.
-                # Дедупликация: один запрос на уникальный (dest, date_from, date_to).
-                extra_tickets: list[dict] = []
-                seen_routes: dict[tuple, list[dict]] = {}
+                # --- Собираем уникальные ключи запросов ---
+
+                # City-подписки с датами: (dest, date_from, date_to)
+                city_keys: dict[tuple, tuple] = {}  # key → (dest, df, dt)
                 for sub in subs:
                     if sub.dest_type == "city" and sub.date_from is not None:
                         key = (sub.dest_code, sub.date_from, sub.date_to)
-                        if key not in seen_routes:
-                            route_t = await get_route_tickets(
-                                origin,
-                                sub.dest_code,
-                                sub.date_from.isoformat(),
-                                sub.date_to.isoformat(),
-                            )
-                            await asyncio.sleep(0.1)
-                            seen_routes[key] = route_t
-                        extra_tickets.extend(seen_routes[key])
+                        city_keys[key] = (
+                            sub.dest_code,
+                            sub.date_from.isoformat(),
+                            sub.date_to.isoformat(),
+                        )
 
-                # Для country/region подписок: дёргаем /v3/prices_for_dates
-                # с кодом страны. date_from нормализуем до начала месяца —
-                # все подписки в одном месяце дают один запрос/кеш-ключ.
-                # Точная фильтрация дат — в памяти через _ticket_matches.
-                # Ключ дедупликации: (country, YYYY-MM).
-                seen_country_months: dict[tuple, list[dict]] = {}
+                # Country/region-подписки: (country_code, month_key)
+                country_keys: dict[tuple, tuple] = {}  # key → (cc, month_key)
                 for sub in subs:
                     if sub.dest_type == "country":
-                        country_codes = [sub.dest_code]
+                        ccs = [sub.dest_code]
                     elif sub.dest_type == "region":
-                        country_codes = REGIONS.get(sub.dest_code, [])
+                        ccs = REGIONS.get(sub.dest_code, [])
                     else:
                         continue
-
                     month_key = sub.date_from.strftime("%Y-%m") if sub.date_from else ""
+                    for cc in ccs:
+                        k = (cc, month_key)
+                        country_keys[k] = (cc, month_key)
 
-                    for cc in country_codes:
-                        key = (cc, month_key)
-                        if key not in seen_country_months:
-                            cc_tickets = await get_route_tickets(origin, cc, departure_month=month_key)
-                            await asyncio.sleep(0.1)
-                            seen_country_months[key] = cc_tickets
-                        extra_tickets.extend(seen_country_months[key])
+                # --- Параллельные запросы ---
+                city_coros = {k: _fetch_route(origin, v[0], v[1], v[2]) for k, v in city_keys.items()}
+                country_coros = {k: _fetch_country(origin, v[0], v[1]) for k, v in country_keys.items()}
+
+                city_results = dict(zip(
+                    city_coros.keys(),
+                    await asyncio.gather(*city_coros.values()),
+                ))
+                country_results = dict(zip(
+                    country_coros.keys(),
+                    await asyncio.gather(*country_coros.values()),
+                ))
+
+                # --- Собираем тикеты ---
+                extra_tickets: list[dict] = []
+                for sub in subs:
+                    if sub.dest_type == "city" and sub.date_from is not None:
+                        key = (sub.dest_code, sub.date_from, sub.date_to)
+                        extra_tickets.extend(city_results.get(key, []))
+                    elif sub.dest_type in ("country", "region"):
+                        ccs = [sub.dest_code] if sub.dest_type == "country" else REGIONS.get(sub.dest_code, [])
+                        month_key = sub.date_from.strftime("%Y-%m") if sub.date_from else ""
+                        for cc in ccs:
+                            extra_tickets.extend(country_results.get((cc, month_key), []))
 
                 all_tickets = extra_tickets
 
