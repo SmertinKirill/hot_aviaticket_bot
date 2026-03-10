@@ -187,7 +187,7 @@ async def get_route_tickets(
 
     except Exception as e:
         logger.error(
-            "get_route_tickets %s→%s: %s", origin_iata, destination_iata, e
+            "get_route_tickets %s→%s: %s: %s", origin_iata, destination_iata, type(e).__name__, e
         )
         return []
 
