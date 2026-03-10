@@ -293,28 +293,11 @@ async def monitor_cycle(bot: Bot) -> None:
                 for sub in subs:
                     destinations = await resolve_destinations(sub, session)
 
-                    def _ticket_matches(t: dict) -> bool:
-                        if sub.date_from is not None:
-                            d = _parse_ticket_date(t["departure_at"])
-                            if not (sub.date_from <= d <= sub.date_to):
-                                return False
-                        if sub.max_stops is not None:
-                            s = t.get("stops")
-                            if s is None or s > sub.max_stops:
-                                return False
-                        if sub.max_duration is not None:
-                            dur = t.get("duration")
-                            dur_to = t.get("duration_to")
-                            if dur is not None and dur_to is not None:
-                                if (dur - dur_to) > sub.max_duration:
-                                    return False
-                        return True
-
                     for dest in destinations:
                         # Находим самый дешёвый подходящий тикет прямо в памяти
                         matching = [
                             t for t in all_tickets
-                            if t["destination_iata"] == dest and _ticket_matches(t)
+                            if t["destination_iata"] == dest and ticket_matches(sub, t)
                         ]
                         if not matching:
                             continue
@@ -378,6 +361,25 @@ async def monitor_cycle(bot: Bot) -> None:
 
     except Exception as e:
         logger.error("Ошибка цикла мониторинга: %s", e)
+
+
+def ticket_matches(sub, t: dict) -> bool:
+    """Проверяет, соответствует ли тикет фильтрам подписки (дата, пересадки, длительность)."""
+    if sub.date_from is not None:
+        d = _parse_ticket_date(t["departure_at"])
+        if not (sub.date_from <= d <= sub.date_to):
+            return False
+    if sub.max_stops is not None:
+        s = t.get("stops")
+        if s is None or s > sub.max_stops:
+            return False
+    if sub.max_duration is not None:
+        dur = t.get("duration")
+        dur_to = t.get("duration_to")
+        if dur is not None and dur_to is not None:
+            if (dur - dur_to) > sub.max_duration:
+                return False
+    return True
 
 
 def _parse_ticket_date(departure_at: str) -> date:
