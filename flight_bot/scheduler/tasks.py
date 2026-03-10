@@ -42,6 +42,8 @@ MONTHS_RU = {
     9: "сентября", 10: "октября", 11: "ноября", 12: "декабря",
 }
 
+_CURRENCY_SYMBOL = {"RUB": "₽", "USD": "$", "EUR": "€"}
+
 
 async def resolve_destinations(
     subscription: Subscription, session: AsyncSession
@@ -135,13 +137,14 @@ async def _send_notification(
     else:
         stops_line = ""
 
+    symbol = _CURRENCY_SYMBOL.get(deal.get("currency", "RUB"), "₽")
     prev_price = deal.get("prev_price")
     if prev_price is not None and prev_price > deal["current_price"]:
         drop = prev_price - deal["current_price"]
-        drop_line = f"📉 −{drop:,} ₽ от прошлого уведомления\n"
+        drop_line = f"📉 −{drop:,} {symbol} от прошлого уведомления\n"
     else:
         drop = deal["target_price"] - deal["current_price"]
-        drop_line = f"📉 −{drop:,} ₽ от установленной вами цены\n"
+        drop_line = f"📉 −{drop:,} {symbol} от установленной вами цены\n"
 
     text = (
         f"🔥 Горячий билет!\n\n"
@@ -150,8 +153,8 @@ async def _send_notification(
         + "\n"
         f"📅 Вылет: {date_formatted}\n"
         + (f"{stops_line}\n" if stops_line else "")
-        + f"💰 {deal['current_price']:,} ₽  "
-        f"(ваша цена: {deal['target_price']:,} ₽)\n"
+        + f"💰 {deal['current_price']:,} {symbol}  "
+        f"(ваша цена: {deal['target_price']:,} {symbol})\n"
         + drop_line
         + f"\n⚡ Цена может измениться — бронируйте быстрее!"
     ).replace(",", " ")
@@ -226,30 +229,32 @@ async def monitor_cycle(bot: Bot) -> None:
             # Семафор: не более 5 параллельных запросов (~200 req/min при avg 1.5 сек)
             _sem = asyncio.Semaphore(5)
 
-            async def _fetch_route(o: str, dest: str, df: str | None, dt: str | None) -> list[dict]:
+            async def _fetch_route(o: str, dest: str, df: str | None, dt: str | None, curr: str) -> list[dict]:
                 async with _sem:
-                    return await get_route_tickets(o, dest, df, dt)
+                    return await get_route_tickets(o, dest, df, dt, currency=curr.lower())
 
-            async def _fetch_country(o: str, cc: str, month: str) -> list[dict]:
+            async def _fetch_country(o: str, cc: str, month: str, curr: str) -> list[dict]:
                 async with _sem:
-                    return await get_route_tickets(o, cc, departure_month=month)
+                    return await get_route_tickets(o, cc, departure_month=month, currency=curr.lower())
 
             for origin, subs in origin_subs.items():
                 # --- Собираем уникальные ключи запросов ---
 
-                # City-подписки с датами: (dest, date_from, date_to)
-                city_keys: dict[tuple, tuple] = {}  # key → (dest, df, dt)
+                # City-подписки с датами: (dest, date_from, date_to, currency)
+                city_keys: dict[tuple, tuple] = {}  # key → (dest, df, dt, currency)
                 for sub in subs:
                     if sub.dest_type == "city" and sub.date_from is not None:
-                        key = (sub.dest_code, sub.date_from, sub.date_to)
+                        currency = sub.currency or "RUB"
+                        key = (sub.dest_code, sub.date_from, sub.date_to, currency)
                         city_keys[key] = (
                             sub.dest_code,
                             sub.date_from.isoformat(),
                             sub.date_to.isoformat(),
+                            currency,
                         )
 
-                # Country/region-подписки: (country_code, month_key)
-                country_keys: dict[tuple, tuple] = {}  # key → (cc, month_key)
+                # Country/region-подписки: (country_code, month_key, currency)
+                country_keys: dict[tuple, tuple] = {}  # key → (cc, month_key, currency)
                 for sub in subs:
                     if sub.dest_type == "country":
                         ccs = [sub.dest_code]
@@ -257,14 +262,15 @@ async def monitor_cycle(bot: Bot) -> None:
                         ccs = REGIONS.get(sub.dest_code, [])
                     else:
                         continue
+                    currency = sub.currency or "RUB"
                     month_key = sub.date_from.strftime("%Y-%m") if sub.date_from else ""
                     for cc in ccs:
-                        k = (cc, month_key)
-                        country_keys[k] = (cc, month_key)
+                        k = (cc, month_key, currency)
+                        country_keys[k] = (cc, month_key, currency)
 
                 # --- Параллельные запросы ---
-                city_coros = {k: _fetch_route(origin, v[0], v[1], v[2]) for k, v in city_keys.items()}
-                country_coros = {k: _fetch_country(origin, v[0], v[1]) for k, v in country_keys.items()}
+                city_coros = {k: _fetch_route(origin, v[0], v[1], v[2], v[3]) for k, v in city_keys.items()}
+                country_coros = {k: _fetch_country(origin, v[0], v[1], v[2]) for k, v in country_keys.items()}
 
                 city_results = dict(zip(
                     city_coros.keys(),
@@ -278,14 +284,15 @@ async def monitor_cycle(bot: Bot) -> None:
                 # --- Собираем тикеты ---
                 extra_tickets: list[dict] = []
                 for sub in subs:
+                    currency = sub.currency or "RUB"
                     if sub.dest_type == "city" and sub.date_from is not None:
-                        key = (sub.dest_code, sub.date_from, sub.date_to)
+                        key = (sub.dest_code, sub.date_from, sub.date_to, currency)
                         extra_tickets.extend(city_results.get(key, []))
                     elif sub.dest_type in ("country", "region"):
                         ccs = [sub.dest_code] if sub.dest_type == "country" else REGIONS.get(sub.dest_code, [])
                         month_key = sub.date_from.strftime("%Y-%m") if sub.date_from else ""
                         for cc in ccs:
-                            extra_tickets.extend(country_results.get((cc, month_key), []))
+                            extra_tickets.extend(country_results.get((cc, month_key, currency), []))
 
                 all_tickets = extra_tickets
 
@@ -317,6 +324,7 @@ async def monitor_cycle(bot: Bot) -> None:
                         if deal is not None:
                             deal["stops"] = best.get("stops")
                             deal["layover"] = layover
+                            deal["currency"] = sub.currency or "RUB"
                             total_deals += 1
                             savings_pct = round(
                                 (deal["target_price"] - deal["current_price"])

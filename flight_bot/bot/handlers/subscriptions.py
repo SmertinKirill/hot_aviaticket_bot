@@ -28,7 +28,7 @@ from bot.keyboards.inline import (
     subscription_list,
 )
 from bot.states import SubscribeStates
-from core.api.travelpayouts import get_global_min_price, get_route_tickets
+from core.api.travelpayouts import get_route_tickets
 from core.db.models import City, Country
 from core.db.repositories.subscription_repo import SubscriptionRepository
 from core.db.repositories.user_repo import UserRepository
@@ -48,6 +48,7 @@ MONTHS_NOM = {
 }
 STOPS_LABELS = {0: "только прямые", 1: "до 1 пересадки", 2: "до 2 пересадок"}
 DURATION_LABELS = {240: "до 4 ч", 480: "до 8 ч", 1080: "до 18 ч", 1440: "до 24 ч"}
+_CURRENCY_SYMBOL = {"RUB": "₽", "USD": "$", "EUR": "€"}
 
 # Регионы (дублируем здесь для вычисления reference price)
 _REGIONS = {
@@ -414,14 +415,13 @@ async def process_date_input(message: Message, state: FSMContext):
 # --- Выбор пересадок → сводка + ввод цены ---
 
 @router.callback_query(F.data.startswith("stops:"))
-async def cb_stops_select(callback: CallbackQuery, state: FSMContext):
+async def cb_stops_select(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     max_stops = int(callback.data.split(":")[1])
     await callback.answer()
     await state.update_data(max_stops=max_stops, max_duration=None)
 
     if max_stops == 0:
-        # Прямой рейс — пересадок нет, сразу к цене
-        await _ask_price(callback, state)
+        await _ask_price(callback, state, session)
     else:
         await callback.message.edit_text(
             "Максимальное время пересадок:",
@@ -430,35 +430,40 @@ async def cb_stops_select(callback: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data.startswith("duration:"))
-async def cb_duration_select(callback: CallbackQuery, state: FSMContext):
+async def cb_duration_select(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     value = int(callback.data.split(":")[1])
     max_duration = value if value > 0 else None
     await callback.answer()
     await state.update_data(max_duration=max_duration)
-    await _ask_price(callback, state)
+    await _ask_price(callback, state, session)
 
 
-async def _ask_price(callback: CallbackQuery, state: FSMContext) -> None:
+async def _ask_price(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     data = await state.get_data()
     origin_iata = data.get("origin_iata")
     dest_type = data.get("pending_dest_type")
     dest_code = data.get("pending_dest_code")
     date_from = data.get("date_from")
     date_to = data.get("date_to")
+    max_stops = data.get("max_stops")
+
+    user_repo = UserRepository(session)
+    user = await user_repo.get_by_telegram_id(callback.from_user.id)
+    currency = (user.default_currency if user else None) or "RUB"
+    symbol = _CURRENCY_SYMBOL.get(currency, "₽")
 
     await callback.message.edit_text("⏳ Загружаем данные о ценах...")
 
     ref_price = await _get_reference_price(
-        origin_iata, dest_type, dest_code, date_from, date_to
+        origin_iata, dest_type, dest_code, date_from, date_to, currency
     )
-    price_line = f"\n\n💰 Сейчас минимальная цена: ~{ref_price:,} ₽".replace(",", " ") if ref_price else ""
+    price_line = f"\n\n💰 Сейчас минимальная цена: ~{ref_price:,} {symbol}".replace(",", " ") if ref_price else ""
 
     text = (
-        f"Сколько максимум вы готовы потратить на билет? (₽):\n"
+        f"Сколько максимум вы готовы потратить на билет? ({symbol}):\n"
         f"(например: 7500)"
         f"{price_line}"
     )
-    max_stops = data.get("max_stops")
     back_cb = "sub_back:stops" if max_stops == 0 else "sub_back:duration"
     await state.set_state(SubscribeStates.waiting_for_target_price)
     await callback.message.edit_text(text, reply_markup=_back_kb(back_cb))
@@ -517,13 +522,14 @@ async def _finalize_subscription(
     if not user:
         return
 
+    currency = user.default_currency or "RUB"
     editing_sub_id = data.get("editing_sub_id")
 
     if editing_sub_id:
         # Режим редактирования — обновляем существующую подписку
         updated = await sub_repo.update(
             editing_sub_id, user.id, origin_iata, dest_type, dest_code,
-            date_from, date_to, max_stops, max_duration, target_price,
+            date_from, date_to, max_stops, max_duration, target_price, currency,
         )
         if updated:
             logger.info(
@@ -549,7 +555,7 @@ async def _finalize_subscription(
         try:
             await sub_repo.create(
                 user.id, origin_iata, dest_type, dest_code,
-                date_from, date_to, max_stops, max_duration, target_price,
+                date_from, date_to, max_stops, max_duration, target_price, currency,
             )
             logger.info(
                 "user_id=%d: подписка создана OK: %s→%s:%s dates=%s/%s stops=%s price=%s",
@@ -568,7 +574,8 @@ async def _finalize_subscription(
     date_line = _date_label(date_from, date_to).strip(" ·") or "любые даты"
     stops_line = STOPS_LABELS.get(max_stops, "") if max_stops is not None else "любые"
     duration_line = DURATION_LABELS.get(max_duration, "без ограничений") if max_duration is not None else "без ограничений"
-    price_str = f"{target_price:,} ₽".replace(",", " ")
+    symbol = _CURRENCY_SYMBOL.get(currency, "₽")
+    price_str = f"{target_price:,} {symbol}".replace(",", " ")
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="➕ Создать ещё одну подписку", callback_data="subscribe")
     ]])
@@ -653,6 +660,7 @@ async def cb_sub_back(callback: CallbackQuery, state: FSMContext, session: Async
         )
 
 
+
 # --- Список подписок ---
 
 @router.message(Command("mysubscriptions"))
@@ -687,8 +695,9 @@ async def _show_subscriptions(
         dest_label = await _dest_label(session, sub.dest_type, sub.dest_code)
         origin_name = await _city_name(session, sub.origin_iata)
         date_str = _date_label(sub.date_from, sub.date_to)
+        sub_symbol = {"RUB": "₽", "USD": "$", "EUR": "€"}.get(sub.currency, "₽")
         price_str = (
-            f" · ≤{sub.target_price:,} ₽".replace(",", " ")
+            f" · ≤{sub.target_price:,} {sub_symbol}".replace(",", " ")
             if sub.target_price else ""
         )
         dest_labels[sub.id] = f"{origin_name} → {dest_label}{date_str}{price_str}"
@@ -774,31 +783,25 @@ async def _get_reference_price(
     dest_code: str,
     date_from: str | None = None,
     date_to: str | None = None,
+    currency: str = "RUB",
 ) -> int | None:
-    """Получить минимальную цену для направления с учётом дат."""
-    # Для конкретного города — прямой запрос по маршруту с фильтром дат
+    """Получить минимальную цену для направления с учётом дат и валюты."""
     if dest_type == "city":
-        try:
-            return await get_global_min_price(
-                origin_iata, dest_code, date_from, date_to
-            )
-        except Exception:
-            return None
-
-    # Для страны/региона: запрашиваем по коду страны через REST.
-    # Берём первую страну региона как ориентир — это лишь подсказка при создании подписки.
-    if dest_type == "country":
-        country_codes = [dest_code]
+        dest_codes = [dest_code]
+    elif dest_type == "country":
+        dest_codes = [dest_code]
     elif dest_type == "region":
-        country_codes = _REGIONS.get(dest_code, [])
+        dest_codes = _REGIONS.get(dest_code, [])
     else:
         return None
 
-    if not country_codes:
+    if not dest_codes:
         return None
 
     try:
-        tickets = await get_route_tickets(origin_iata, country_codes[0], date_from, date_to)
+        tickets = await get_route_tickets(
+            origin_iata, dest_codes[0], date_from, date_to, currency=currency.lower()
+        )
     except Exception:
         return None
 

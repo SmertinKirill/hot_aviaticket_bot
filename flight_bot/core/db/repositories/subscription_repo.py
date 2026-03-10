@@ -31,6 +31,7 @@ class SubscriptionRepository:
         max_stops: int | None = None,
         max_duration: int | None = None,
         target_price: int | None = None,
+        currency: str = "RUB",
     ) -> Subscription:
         # Если подписка уже есть (в т.ч. неактивная) — реактивируем её
         stmt = select(Subscription).where(
@@ -38,6 +39,8 @@ class SubscriptionRepository:
             Subscription.origin_iata == origin_iata,
             Subscription.dest_type == dest_type,
             Subscription.dest_code == dest_code,
+            Subscription.date_from == date_from,
+            Subscription.date_to == date_to,
         )
         result = await self.session.execute(stmt)
         existing = result.scalar_one_or_none()
@@ -53,6 +56,7 @@ class SubscriptionRepository:
             existing.max_stops = max_stops
             existing.max_duration = max_duration
             existing.target_price = target_price
+            existing.currency = currency
             await self.session.commit()
             await self.session.refresh(existing)
             return existing
@@ -67,6 +71,7 @@ class SubscriptionRepository:
             max_stops=max_stops,
             max_duration=max_duration,
             target_price=target_price,
+            currency=currency,
         )
         self.session.add(sub)
         await self.session.commit()
@@ -85,6 +90,7 @@ class SubscriptionRepository:
         max_stops: int | None = None,
         max_duration: int | None = None,
         target_price: int | None = None,
+        currency: str = "RUB",
     ) -> bool:
         stmt = (
             update(Subscription)
@@ -101,6 +107,7 @@ class SubscriptionRepository:
                 max_stops=max_stops,
                 max_duration=max_duration,
                 target_price=target_price,
+                currency=currency,
             )
         )
         result = await self.session.execute(stmt)

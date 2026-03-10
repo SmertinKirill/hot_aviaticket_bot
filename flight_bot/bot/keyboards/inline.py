@@ -171,6 +171,19 @@ def quiet_hours_menu(quiet_from: int | None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def currency_select(back_cb: str = "settings", current: str = "") -> InlineKeyboardMarkup:
+    def mark(code: str) -> str:
+        return f"✅ " if code == current else ""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text=f"{mark('RUB')}🇷🇺 Рубли (₽)", callback_data="set_currency:RUB"),
+            InlineKeyboardButton(text=f"{mark('USD')}🇺🇸 Доллары ($)", callback_data="set_currency:USD"),
+            InlineKeyboardButton(text=f"{mark('EUR')}🇪🇺 Евро (€)", callback_data="set_currency:EUR"),
+        ],
+        [InlineKeyboardButton(text="← Назад", callback_data=back_cb)],
+    ])
+
+
 def add_first_subscription() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[

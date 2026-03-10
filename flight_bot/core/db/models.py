@@ -73,6 +73,7 @@ class User(Base):
         String, ForeignKey("cities.iata"), nullable=True
     )
     threshold_pct: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    default_currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="RUB")
     quiet_from: Mapped[int | None] = mapped_column(Integer, nullable=True)
     quiet_to: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -103,6 +104,7 @@ class Subscription(Base):
     max_stops: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_duration: Mapped[int | None] = mapped_column(Integer, nullable=True)  # минуты
     target_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="RUB")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now()
@@ -111,7 +113,7 @@ class Subscription(Base):
     user: Mapped["User"] = relationship(back_populates="subscriptions")
 
     __table_args__ = (
-        UniqueConstraint("user_id", "origin_iata", "dest_type", "dest_code", name="uq_user_origin_dest"),
+        UniqueConstraint("user_id", "origin_iata", "dest_type", "dest_code", "date_from", "date_to", name="uq_user_origin_dest"),
     )
 
 

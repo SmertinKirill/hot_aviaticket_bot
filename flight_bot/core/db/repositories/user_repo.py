@@ -42,6 +42,11 @@ class UserRepository:
         await self.session.execute(stmt)
         await self.session.commit()
 
+    async def update_default_currency(self, user_id: int, currency: str) -> None:
+        stmt = update(User).where(User.id == user_id).values(default_currency=currency)
+        await self.session.execute(stmt)
+        await self.session.commit()
+
     async def update_threshold(self, user_id: int, threshold_pct: int) -> User:
         if not (20 <= threshold_pct <= 50):
             raise ValueError("Порог должен быть от 20 до 50%")

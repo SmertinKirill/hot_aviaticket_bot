@@ -126,6 +126,7 @@ async def get_route_tickets(
     date_from: str | None = None,
     date_to: str | None = None,
     departure_month: str | None = None,
+    currency: str = "rub",
 ) -> list[dict]:
     """Получить билеты для конкретного маршрута с фильтрацией по датам.
 
@@ -139,7 +140,7 @@ async def get_route_tickets(
         "origin": origin_iata,
         "destination": destination_iata,
         "one_way": "true",
-        "currency": "rub",
+        "currency": currency.lower(),
         "sorting": "price",
         "limit": 100,
     }

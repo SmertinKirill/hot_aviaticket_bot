@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyKeyboardRemove
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.keyboards.inline import quiet_hours_menu
+from bot.keyboards.inline import currency_select, quiet_hours_menu
 from core.config import ADMIN_IDS
 from core.db.repositories.subscription_repo import SubscriptionRepository
 from core.db.repositories.user_repo import UserRepository
@@ -51,12 +51,17 @@ async def _show_settings(event: Message | CallbackQuery, session: AsyncSession):
     else:
         quiet_label = "🔔 выключен"
 
+    currency = user.default_currency or "RUB"
+    currency_label = {"RUB": "🇷🇺 Рубли (₽)", "USD": "🇺🇸 Доллары ($)", "EUR": "🇪🇺 Евро (€)"}.get(currency, currency)
+
     text = (
         f"⚙️ Настройки\n\n"
         f"📋 Активных подписок: {count}/10\n"
+        f"💱 Валюта: {currency_label}\n"
         f"🌙 Тихий режим: {quiet_label}"
     )
     rows = [
+        [InlineKeyboardButton(text="💱 Валюта", callback_data="currency_menu")],
         [InlineKeyboardButton(text="🌙 Тихий режим", callback_data="quiet_menu")],
     ]
     if ADMIN_IDS:
@@ -67,6 +72,39 @@ async def _show_settings(event: Message | CallbackQuery, session: AsyncSession):
         await event.message.edit_text(text, reply_markup=kb)
     else:
         await event.answer(text, reply_markup=kb)
+
+
+@router.callback_query(F.data == "currency_menu")
+async def cb_currency_menu(callback: CallbackQuery, session: AsyncSession):
+    await callback.answer()
+    user_repo = UserRepository(session)
+    user = await user_repo.get_by_telegram_id(callback.from_user.id)
+    current = user.default_currency if user else "RUB"
+    await callback.message.edit_text(
+        "💱 Валюта по умолчанию\n\n"
+        "Новые подписки будут создаваться в этой валюте.\n"
+        "Уже существующие подписки своей валюты не меняют.",
+        reply_markup=currency_select(current=current),
+    )
+
+
+@router.callback_query(F.data.startswith("set_currency:"))
+async def cb_set_currency(callback: CallbackQuery, session: AsyncSession):
+    currency = callback.data.split(":")[1]
+    await callback.answer()
+    user_repo = UserRepository(session)
+    user = await user_repo.get_by_telegram_id(callback.from_user.id)
+    if not user:
+        return
+    await user_repo.update_default_currency(user.id, currency)
+    label = {"RUB": "🇷🇺 Рубли (₽)", "USD": "🇺🇸 Доллары ($)", "EUR": "🇪🇺 Евро (€)"}.get(currency, currency)
+    await callback.message.edit_text(
+        f"💱 Валюта сохранена: {label}\n\n"
+        "Новые подписки будут создаваться в этой валюте.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="← Назад", callback_data="settings")
+        ]]),
+    )
 
 
 @router.callback_query(F.data == "quiet_menu")
