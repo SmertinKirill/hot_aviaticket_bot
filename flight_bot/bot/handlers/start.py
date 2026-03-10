@@ -39,7 +39,7 @@ async def cmd_start(message: Message, session: AsyncSession, state: FSMContext):
         username=message.from_user.username,
     )
     await message.answer(
-        "Привет! Я помогу найти горящие авиабилеты и уведомлю тебя, "
+        "Привет! Я помогу найти горячие авиабилеты и уведомлю тебя, "
         "когда цена упадёт существенно ниже обычной.\n\n"
         "Добавьте первую подписку на направление:",
         reply_markup=add_first_subscription(),
