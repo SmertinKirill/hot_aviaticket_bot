@@ -24,7 +24,8 @@ async def main() -> None:
     scheduler = AsyncIOScheduler()
 
     scheduler.add_job(
-        monitor_cycle, "interval", minutes=15, args=[bot], id="monitor"
+        monitor_cycle, "interval", minutes=15, args=[bot], id="monitor",
+        max_instances=1,
     )
     scheduler.add_job(
         clean_old_prices, "interval", days=1, id="retention"

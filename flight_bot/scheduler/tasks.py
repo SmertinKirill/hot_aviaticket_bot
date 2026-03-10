@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 from aiogram import Bot
 from aiogram.exceptions import TelegramRetryAfter
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import analyzer
@@ -225,8 +225,8 @@ async def monitor_cycle(bot: Bot) -> None:
             total_routes = 0
             total_deals = 0
 
-            # Семафор: не более 10 параллельных запросов (лимит API 600 req/min)
-            _sem = asyncio.Semaphore(10)
+            # Семафор: не более 5 параллельных запросов (~200 req/min при avg 1.5 сек)
+            _sem = asyncio.Semaphore(5)
 
             async def _fetch_route(o: str, dest: str, df: str | None, dt: str | None) -> list[dict]:
                 async with _sem:
@@ -412,12 +412,27 @@ def _parse_ticket_date(departure_at: str) -> date:
 
 
 async def clean_old_prices() -> None:
-    """Удаление старых записей price_history (retention policy)."""
+    """Удаление старых записей price_history + деактивация устаревших подписок."""
     try:
         async with async_session() as session:
             price_repo = PriceHistoryRepository(session)
             deleted = await price_repo.delete_older_than(weeks=12)
             logger.info("Retention: удалено %d записей старше 12 недель", deleted)
+
+            # Деактивируем подписки, у которых date_to уже прошла
+            today = date.today()
+            result = await session.execute(
+                update(Subscription)
+                .where(
+                    Subscription.is_active.is_(True),
+                    Subscription.date_to < today,
+                )
+                .values(is_active=False)
+            )
+            expired = result.rowcount
+            await session.commit()
+            if expired:
+                logger.info("Retention: деактивировано %d устаревших подписок", expired)
     except Exception as e:
         logger.error("Ошибка retention job: %s", e)
 
