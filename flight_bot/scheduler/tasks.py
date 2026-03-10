@@ -144,7 +144,7 @@ async def _send_notification(
         drop_line = f"📉 −{drop:,} ₽ от установленной вами цены\n"
 
     text = (
-        f"🔥 Горящий билет!\n\n"
+        f"🔥 Горячий билет!\n\n"
         f"{origin_name} → {dest_name}"
         + (f" ({country_name})" if country_name else "")
         + "\n"
