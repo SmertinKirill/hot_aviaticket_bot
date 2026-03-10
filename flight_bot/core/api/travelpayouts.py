@@ -23,7 +23,7 @@ async def shorten_link(url: str) -> str:
     или исходный url при любой ошибке.
     """
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.post(
                 LINKS_URL,
                 json={
@@ -147,7 +147,7 @@ async def get_route_tickets(
         params["departure_at"] = departure_month
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.get(
                 REST_PRICES_URL,
                 params=params,
