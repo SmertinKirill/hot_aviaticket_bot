@@ -147,7 +147,7 @@ async def get_route_tickets(
         params["departure_at"] = departure_month
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
                 REST_PRICES_URL,
                 params=params,
