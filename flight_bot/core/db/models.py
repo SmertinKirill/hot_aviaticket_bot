@@ -72,7 +72,6 @@ class User(Base):
     origin_iata: Mapped[str | None] = mapped_column(
         String, ForeignKey("cities.iata"), nullable=True
     )
-    threshold_pct: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
     default_currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="RUB")
     quiet_from: Mapped[int | None] = mapped_column(Integer, nullable=True)
     quiet_to: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -82,13 +81,6 @@ class User(Base):
     )
 
     subscriptions: Mapped[list["Subscription"]] = relationship(back_populates="user")
-
-    __table_args__ = (
-        CheckConstraint(
-            "threshold_pct BETWEEN 20 AND 50",
-            name="ck_users_threshold_pct",
-        ),
-    )
 
 
 class Subscription(Base):
