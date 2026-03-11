@@ -154,20 +154,38 @@ def month_select() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def quiet_hours_menu(quiet_from: int | None) -> InlineKeyboardMarkup:
-    presets = [
-        ("🔇 22:00 – 08:00", "quiet:22:8"),
-        ("🔇 23:00 – 07:00", "quiet:23:7"),
-        ("🔇 00:00 – 09:00", "quiet:0:9"),
-    ]
+_TIMEZONES = [
+    ("-8", "Лос-Анджелес", -8),
+    ("-5", "Нью-Йорк", -5),
+    ("+0", "Лондон", 0),
+    ("+1", "Берлин / Париж", 1),
+    ("+2", "Калининград", 2),
+    ("+3", "Москва (МСК)", 3),
+    ("+4", "Дубай", 4),
+    ("+7", "Новосибирск", 7),
+    ("+8", "Пекин / Сингапур", 8),
+    ("+9", "Токио / Сеул", 9),
+    ("+10", "Владивосток", 10),
+]
+
+
+def timezone_select(current_tz: int | None = None) -> InlineKeyboardMarkup:
     buttons = []
-    for label, data in presets:
-        # Подсвечиваем активный пресет галочкой
-        h = int(data.split(":")[1])
-        if quiet_from == h:
-            label = "✅ " + label.lstrip("🔇 ")
-        buttons.append([InlineKeyboardButton(text=label, callback_data=data)])
-    buttons.append([InlineKeyboardButton(text="🔔 Отключить", callback_data="quiet:off")])
+    row = []
+    for offset_label, city, offset in _TIMEZONES:
+        mark = "✅ " if current_tz == offset else ""
+        btn = InlineKeyboardButton(
+            text=f"{mark}UTC{offset_label} {city}",
+            callback_data=f"quiet_tz:{offset}",
+        )
+        row.append(btn)
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton(text="🔔 Отключить тихий режим", callback_data="quiet:off")])
+    buttons.append([InlineKeyboardButton(text="← Назад", callback_data="settings")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 

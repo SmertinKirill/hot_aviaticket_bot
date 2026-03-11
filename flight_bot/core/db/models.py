@@ -75,6 +75,7 @@ class User(Base):
     default_currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="RUB")
     quiet_from: Mapped[int | None] = mapped_column(Integer, nullable=True)
     quiet_to: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    quiet_timezone: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now()

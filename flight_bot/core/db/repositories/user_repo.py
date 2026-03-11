@@ -32,12 +32,16 @@ class UserRepository:
         return result.scalar_one()
 
     async def update_quiet_hours(
-        self, user_id: int, quiet_from: int | None, quiet_to: int | None
+        self,
+        user_id: int,
+        quiet_from: int | None,
+        quiet_to: int | None,
+        quiet_timezone: int | None = None,
     ) -> None:
         stmt = (
             update(User)
             .where(User.id == user_id)
-            .values(quiet_from=quiet_from, quiet_to=quiet_to)
+            .values(quiet_from=quiet_from, quiet_to=quiet_to, quiet_timezone=quiet_timezone)
         )
         await self.session.execute(stmt)
         await self.session.commit()

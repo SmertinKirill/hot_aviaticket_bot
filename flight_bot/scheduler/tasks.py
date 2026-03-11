@@ -101,9 +101,9 @@ async def _get_country_name(city_iata: str, session: AsyncSession) -> str | None
     return result.scalar_one_or_none()
 
 
-def _is_quiet_time(quiet_from: int, quiet_to: int) -> bool:
-    """Проверить, находимся ли в тихом периоде (московское время, UTC+3)."""
-    hour = (datetime.utcnow().hour + 3) % 24
+def _is_quiet_time(quiet_from: int, quiet_to: int, tz_offset: int = 3) -> bool:
+    """Проверить, находимся ли в тихом периоде по часовому поясу пользователя."""
+    hour = (datetime.utcnow().hour + tz_offset) % 24
     if quiet_from > quiet_to:  # диапазон пересекает полночь: 22–08
         return hour >= quiet_from or hour < quiet_to
     return quiet_from <= hour < quiet_to
@@ -175,7 +175,7 @@ async def _send_notification(
     silent = (
         user is not None
         and user.quiet_from is not None
-        and _is_quiet_time(user.quiet_from, user.quiet_to)
+        and _is_quiet_time(user.quiet_from, user.quiet_to, user.quiet_timezone or 3)
     )
 
     try:

@@ -19,3 +19,7 @@ class SupportStates(StatesGroup):
 
 class AdminReplyStates(StatesGroup):
     waiting_for_reply = State()
+
+
+class QuietHoursStates(StatesGroup):
+    waiting_for_range = State()
