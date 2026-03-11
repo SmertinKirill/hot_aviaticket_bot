@@ -311,6 +311,7 @@ async def monitor_cycle(bot: Bot) -> None:
 
                         best = min(matching, key=lambda t: t["price"])
                         route_key = f"{origin}:{dest}:{best['departure_at']}"
+                        cooldown_key = f"{origin}:{dest}"
                         dur = best.get("duration")
                         dur_to = best.get("duration_to")
                         layover = (dur - dur_to) if dur is not None and dur_to is not None else None
@@ -319,6 +320,7 @@ async def monitor_cycle(bot: Bot) -> None:
                         deal = await analyzer.check(
                             sub, origin, dest,
                             best["price"], best["ticket_link"], route_key,
+                            cooldown_key,
                             session,
                         )
                         if deal is not None:
@@ -334,17 +336,16 @@ async def monitor_cycle(bot: Bot) -> None:
                                 bot, sub.user.telegram_id, deal, session
                             )
                             if sent:
-                                parts = deal["route_key"].split(":")
                                 await notif_repo.create(
                                     subscription_id=deal["subscription_id"],
-                                    route_key=deal["route_key"],
+                                    route_key=cooldown_key,
                                     price=deal["current_price"],
                                     avg_price=deal["target_price"],
                                     discount_pct=savings_pct,
                                     telegram_id=sub.user.telegram_id,
                                     origin_iata=deal["origin_iata"],
                                     dest_iata=deal["dest_iata"],
-                                    departure_at=parts[2] if len(parts) >= 3 else None,
+                                    departure_at=best["departure_at"][:10],
                                     stops=deal.get("stops"),
                                     ticket_link=deal.get("ticket_link"),
                                 )

@@ -49,6 +49,7 @@ async def check(
     current_price: int,
     ticket_link: str,
     route_key: str,
+    cooldown_key: str,
     session: AsyncSession,
 ) -> dict | None:
     """
@@ -65,7 +66,7 @@ async def check(
         return None
 
     notif_repo = NotificationRepository(session)
-    last_notif = await notif_repo.get_last(subscription.id, route_key)
+    last_notif = await notif_repo.get_last(subscription.id, cooldown_key)
     if last_notif:
         elapsed = datetime.utcnow() - last_notif.sent_at
         if elapsed < timedelta(hours=24):
