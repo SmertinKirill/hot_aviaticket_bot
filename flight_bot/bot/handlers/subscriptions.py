@@ -25,6 +25,7 @@ from bot.keyboards.inline import (
     region_select,
     stops_select,
     subscribe_type,
+    subscription_currency_select,
     subscription_list,
 )
 from bot.states import SubscribeStates
@@ -421,7 +422,7 @@ async def cb_stops_select(callback: CallbackQuery, state: FSMContext, session: A
     await state.update_data(max_stops=max_stops, max_duration=None)
 
     if max_stops == 0:
-        await _ask_price(callback, state, session)
+        await _maybe_ask_currency(callback, state, session)
     else:
         await callback.message.edit_text(
             "Максимальное время пересадок:",
@@ -435,6 +436,35 @@ async def cb_duration_select(callback: CallbackQuery, state: FSMContext, session
     max_duration = value if value > 0 else None
     await callback.answer()
     await state.update_data(max_duration=max_duration)
+    await _maybe_ask_currency(callback, state, session)
+
+
+async def _maybe_ask_currency(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+) -> None:
+    """Показать выбор валюты при первой подписке, иначе сразу к цене."""
+    user_repo = UserRepository(session)
+    sub_repo = SubscriptionRepository(session)
+    user = await user_repo.get_by_telegram_id(callback.from_user.id)
+    if user and not await sub_repo.has_any(user.id):
+        await callback.message.edit_text(
+            "💱 Выберите валюту для отслеживания цен:\n\n"
+            "Это станет вашей валютой по умолчанию для всех подписок. "
+            "Изменить её можно в любой момент в ⚙️ Настройках.",
+            reply_markup=subscription_currency_select(),
+        )
+    else:
+        await _ask_price(callback, state, session)
+
+
+@router.callback_query(F.data.startswith("sub_currency:"))
+async def cb_sub_currency(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    currency = callback.data.split(":")[1]
+    await callback.answer()
+    user_repo = UserRepository(session)
+    user = await user_repo.get_by_telegram_id(callback.from_user.id)
+    if user:
+        await user_repo.update_default_currency(user.id, currency)
     await _ask_price(callback, state, session)
 
 

@@ -189,6 +189,16 @@ def timezone_select(current_tz: int | None = None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def subscription_currency_select() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🇷🇺 Рубли (₽)", callback_data="sub_currency:RUB"),
+            InlineKeyboardButton(text="🇺🇸 Доллары ($)", callback_data="sub_currency:USD"),
+            InlineKeyboardButton(text="🇪🇺 Евро (€)", callback_data="sub_currency:EUR"),
+        ],
+    ])
+
+
 def currency_select(back_cb: str = "settings", current: str = "") -> InlineKeyboardMarkup:
     def mark(code: str) -> str:
         return f"✅ " if code == current else ""

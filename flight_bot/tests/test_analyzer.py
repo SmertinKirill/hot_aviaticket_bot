@@ -32,13 +32,13 @@ def mock_notif_repo():
 
 async def test_price_above_target_returns_none(mock_notif_repo):
     sub = _make_sub(target_price=10_000)
-    result = await analyzer.check(sub, "MOW", "BKK", 12_000, "", "MOW:BKK:2026-04-01", AsyncMock())
+    result = await analyzer.check(sub, "MOW", "BKK", 12_000, "", "MOW:BKK:2026-04-01", "MOW:BKK", AsyncMock())
     assert result is None
 
 
 async def test_zero_target_price_returns_none(mock_notif_repo):
     sub = _make_sub(target_price=0)
-    result = await analyzer.check(sub, "MOW", "BKK", 5_000, "", "MOW:BKK:2026-04-01", AsyncMock())
+    result = await analyzer.check(sub, "MOW", "BKK", 5_000, "", "MOW:BKK:2026-04-01", "MOW:BKK", AsyncMock())
     assert result is None
 
 
@@ -46,7 +46,7 @@ async def test_first_notification_returns_deal(mock_notif_repo):
     mock_notif_repo.get_last.return_value = None
     sub = _make_sub(target_price=10_000)
 
-    result = await analyzer.check(sub, "MOW", "BKK", 8_000, "", "MOW:BKK:2026-04-01", AsyncMock())
+    result = await analyzer.check(sub, "MOW", "BKK", 8_000, "", "MOW:BKK:2026-04-01", "MOW:BKK", AsyncMock())
 
     assert result is not None
     assert result["current_price"] == 8_000
@@ -61,7 +61,7 @@ async def test_cooldown_24h_blocks_repeat(mock_notif_repo):
     mock_notif_repo.get_last.return_value = _make_notif(price=9_000, hours_ago=12)
     sub = _make_sub(target_price=10_000)
 
-    result = await analyzer.check(sub, "MOW", "BKK", 8_000, "", "MOW:BKK:2026-04-01", AsyncMock())
+    result = await analyzer.check(sub, "MOW", "BKK", 8_000, "", "MOW:BKK:2026-04-01", "MOW:BKK", AsyncMock())
     assert result is None
 
 
@@ -70,7 +70,7 @@ async def test_same_price_after_24h_blocked_within_7d(mock_notif_repo):
     mock_notif_repo.get_last.return_value = _make_notif(price=8_000, hours_ago=48)
     sub = _make_sub(target_price=10_000)
 
-    result = await analyzer.check(sub, "MOW", "BKK", 8_000, "", "MOW:BKK:2026-04-01", AsyncMock())
+    result = await analyzer.check(sub, "MOW", "BKK", 8_000, "", "MOW:BKK:2026-04-01", "MOW:BKK", AsyncMock())
     assert result is None
 
 
@@ -79,7 +79,7 @@ async def test_lower_price_after_24h_allowed(mock_notif_repo):
     mock_notif_repo.get_last.return_value = _make_notif(price=9_000, hours_ago=48)
     sub = _make_sub(target_price=10_000)
 
-    result = await analyzer.check(sub, "MOW", "BKK", 7_000, "", "MOW:BKK:2026-04-01", AsyncMock())
+    result = await analyzer.check(sub, "MOW", "BKK", 7_000, "", "MOW:BKK:2026-04-01", "MOW:BKK", AsyncMock())
 
     assert result is not None
     assert result["prev_price"] == 9_000
@@ -90,7 +90,7 @@ async def test_resend_after_7_days_same_price(mock_notif_repo):
     mock_notif_repo.get_last.return_value = _make_notif(price=8_000, hours_ago=7 * 24 + 1)
     sub = _make_sub(target_price=10_000)
 
-    result = await analyzer.check(sub, "MOW", "BKK", 8_000, "", "MOW:BKK:2026-04-01", AsyncMock())
+    result = await analyzer.check(sub, "MOW", "BKK", 8_000, "", "MOW:BKK:2026-04-01", "MOW:BKK", AsyncMock())
     assert result is not None
 
 

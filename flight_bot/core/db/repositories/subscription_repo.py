@@ -134,6 +134,11 @@ class SubscriptionRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one()
 
+    async def has_any(self, user_id: int) -> bool:
+        stmt = select(func.count()).where(Subscription.user_id == user_id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one() > 0
+
     async def get_all_active(self) -> list[Subscription]:
         stmt = (
             select(Subscription)
