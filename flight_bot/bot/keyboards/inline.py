@@ -93,6 +93,7 @@ def subscription_list(
                 ),
             ]
         )
+    buttons.append([InlineKeyboardButton(text="← Главное меню", callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 

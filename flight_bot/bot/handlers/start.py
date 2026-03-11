@@ -2,10 +2,10 @@
 
 import logging
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, ReplyKeyboardRemove
+from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,6 +44,12 @@ async def cmd_start(message: Message, session: AsyncSession, state: FSMContext):
         "Добавьте первую подписку на направление:",
         reply_markup=add_first_subscription(),
     )
+
+
+@router.callback_query(F.data == "main_menu")
+async def cb_main_menu(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.edit_text("Выберите действие:", reply_markup=main_menu())
 
 
 # Алиасы: популярные названия, которые пользователи вводят, но которые

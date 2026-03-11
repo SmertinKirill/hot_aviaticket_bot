@@ -69,6 +69,7 @@ async def _show_settings(event: Message | CallbackQuery, session: AsyncSession):
     ]
     if ADMIN_IDS:
         rows.append([InlineKeyboardButton(text="💬 Поддержка", callback_data="support")])
+    rows.append([InlineKeyboardButton(text="← Главное меню", callback_data="main_menu")])
     kb = InlineKeyboardMarkup(inline_keyboard=rows)
 
     if isinstance(event, CallbackQuery):
