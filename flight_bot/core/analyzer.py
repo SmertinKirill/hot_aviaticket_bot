@@ -65,13 +65,19 @@ async def check(
     if current_price > target_price:
         return None
 
+    _SIGNIFICANT_DROP = {"RUB": 100, "USD": 1, "EUR": 1}
+
     notif_repo = NotificationRepository(session)
     last_notif = await notif_repo.get_last(subscription.id, cooldown_key)
     if last_notif:
         elapsed = datetime.utcnow() - last_notif.sent_at
         if elapsed < timedelta(hours=24):
-            return None
-        if current_price >= last_notif.price and elapsed < timedelta(days=7):
+            currency = (subscription.currency or "RUB").upper()
+            threshold = _SIGNIFICANT_DROP.get(currency, 100)
+            drop = last_notif.price - current_price
+            if drop < threshold:
+                return None
+        elif current_price >= last_notif.price and elapsed < timedelta(days=7):
             return None
 
     return {
