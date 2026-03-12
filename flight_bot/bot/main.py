@@ -4,11 +4,12 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand, MenuButtonCommands
+from aiogram.types import BotCommand, ErrorEvent, MenuButtonCommands
 
 from bot.handlers import admin, settings, start, subscriptions
-from bot.middleware import DbSessionMiddleware, LoggingMiddleware
+from bot.middleware import DbSessionMiddleware, LoggingMiddleware, RateLimitMiddleware
 from bootstrap.load_references import load_if_empty
 from core.config import TELEGRAM_TOKEN
 
@@ -19,6 +20,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def on_error(event: ErrorEvent) -> None:
+    if isinstance(event.exception, TelegramBadRequest) and "message is not modified" in str(event.exception):
+        return
+    logger.exception("Необработанная ошибка: %s", event.exception)
+
+
 async def main() -> None:
     logger.info("Bot: запуск")
 
@@ -27,8 +34,11 @@ async def main() -> None:
 
     bot = Bot(token=TELEGRAM_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
+    dp.errors.register(on_error)
 
     # Middleware
+    dp.message.middleware(RateLimitMiddleware())
+    dp.callback_query.middleware(RateLimitMiddleware())
     dp.message.middleware(LoggingMiddleware())
     dp.callback_query.middleware(LoggingMiddleware())
     dp.message.middleware(DbSessionMiddleware())
