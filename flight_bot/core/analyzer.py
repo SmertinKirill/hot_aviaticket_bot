@@ -77,7 +77,7 @@ async def check(
             drop = last_notif.price - current_price
             if drop < threshold:
                 return None
-        elif current_price >= last_notif.price and elapsed < timedelta(days=7):
+        elif current_price >= last_notif.price and elapsed < timedelta(days=3):
             return None
 
     return {
