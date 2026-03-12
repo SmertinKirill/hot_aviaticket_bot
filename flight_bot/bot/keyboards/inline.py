@@ -50,10 +50,13 @@ def region_select() -> InlineKeyboardMarkup:
     )
 
 
-def city_select(cities: list[tuple[str, str]]) -> InlineKeyboardMarkup:
+def city_select(cities: list[tuple[str, str]], show_iata: bool = True) -> InlineKeyboardMarkup:
     """cities: список (iata, name_ru)."""
     buttons = [
-        [InlineKeyboardButton(text=f"{name} ({iata})", callback_data=f"city:{iata}")]
+        [InlineKeyboardButton(
+            text=f"{name} ({iata})" if show_iata else name,
+            callback_data=f"city:{iata}",
+        )]
         for iata, name in cities
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)

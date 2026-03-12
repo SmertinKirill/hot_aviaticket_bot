@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
-from bot.handlers.start import search_cities
+from bot.handlers.start import search_cities, suggest_cities
 from bot.keyboards.inline import (
     city_select,
     country_select,
@@ -100,7 +100,7 @@ async def cmd_subscribe(message: Message, state: FSMContext, session: AsyncSessi
         return
     logger.info("%s: начало создания подписки", _fmt_user(message.from_user))
     await message.answer(
-        "Введите полное название города вылета на русском:",
+        "Введите полное название города вылета на русском языке:",
         reply_markup=_origin_reply_kb(),
     )
     await state.set_state(SubscribeStates.waiting_for_origin_city)
@@ -116,7 +116,7 @@ async def cb_subscribe(callback: CallbackQuery, state: FSMContext, session: Asyn
     await callback.answer()
     await callback.message.edit_text("Выбор города вылета:")
     await callback.message.answer(
-        "Введите полное название города вылета на русском:",
+        "Введите полное название города вылета на русском языке:",
         reply_markup=_origin_reply_kb(),
     )
     await state.set_state(SubscribeStates.waiting_for_origin_city)
@@ -131,7 +131,16 @@ async def process_origin_city_input(
 
     if not cities:
         logger.info("%s: город вылета не найден, запрос=%r", _fmt_user(message.from_user), query)
-        await message.answer("Город не найден. Попробуйте ещё раз:", reply_markup=_origin_reply_kb())
+        suggestions = await suggest_cities(session, query)
+        if suggestions:
+            kb = city_select(await _cities_with_country(session, suggestions), show_iata=False)
+            for row in kb.inline_keyboard:
+                for btn in row:
+                    iata = btn.callback_data.split(":")[1]
+                    btn.callback_data = f"sub_origin_pick:{iata}"
+            await message.answer("Город не найден. Возможно, вы имели в виду:", reply_markup=kb)
+        else:
+            await message.answer("Город не найден. Попробуйте ещё раз:", reply_markup=_origin_reply_kb())
         return
 
     remove_kb = ReplyKeyboardRemove()
@@ -208,8 +217,8 @@ async def cb_region_select(callback: CallbackQuery, state: FSMContext, session: 
         if names:
             countries_text = f"🌍 Страны региона {region}:\n\n" + ", ".join(names)
 
-    await callback.message.edit_text(countries_text or f"📍 Регион: {region}")
-    await callback.message.answer("Выберите период вылета:", reply_markup=date_type_select())
+    text = (countries_text + "\n\nВыберите период вылета:") if countries_text else "Выберите период вылета:"
+    await callback.message.edit_text(text, reply_markup=date_type_select())
 
 
 # --- Страна ---
@@ -294,7 +303,16 @@ async def process_city_input(
     cities = await search_cities(session, message.text.strip())
 
     if not cities:
-        await message.answer("Город не найден. Попробуйте ещё раз:")
+        suggestions = await suggest_cities(session, message.text.strip())
+        if suggestions:
+            kb = city_select(await _cities_with_country(session, suggestions), show_iata=False)
+            for row in kb.inline_keyboard:
+                for btn in row:
+                    iata = btn.callback_data.split(":")[1]
+                    btn.callback_data = f"sub_city_pick:{iata}"
+            await message.answer("Город не найден. Возможно, вы имели в виду:", reply_markup=kb)
+        else:
+            await message.answer("Город не найден. Попробуйте ещё раз:")
         return
 
     if len(cities) == 1:
@@ -642,7 +660,7 @@ async def cb_sub_back(callback: CallbackQuery, state: FSMContext, session: Async
         await state.set_state(SubscribeStates.waiting_for_origin_city)
         await callback.message.edit_text("Изменение города вылета:")
         await callback.message.answer(
-            "Введите полное название города вылета на русском:",
+            "Введите полное название города вылета на русском языке:",
             reply_markup=_origin_reply_kb(),
         )
 
@@ -752,7 +770,7 @@ async def cb_edit_subscription(
     await state.update_data(editing_sub_id=sub_id)
     await callback.message.edit_text("Редактирование подписки:")
     await callback.message.answer(
-        "Введите полное название города вылета на русском:",
+        "Введите полное название города вылета на русском языке:",
         reply_markup=_origin_reply_kb(),
     )
     await state.set_state(SubscribeStates.waiting_for_origin_city)
@@ -785,6 +803,20 @@ async def cb_unsub(callback: CallbackQuery, session: AsyncSession):
 
 
 # --- Хелперы ---
+
+async def _cities_with_country(session: AsyncSession, cities: list) -> list[tuple[str, str]]:
+    """Возвращает список (iata, 'Город (Страна)') для отображения в кнопках."""
+    codes = [c.country_code for c in cities if c.country_code]
+    country_names: dict[str, str] = {}
+    if codes:
+        stmt = select(Country.code, Country.name_ru).where(Country.code.in_(codes))
+        result = await session.execute(stmt)
+        country_names = dict(result.all())
+    return [
+        (c.iata, f"{c.name_ru} ({country_names.get(c.country_code, c.iata)})")
+        for c in cities
+    ]
+
 
 async def _city_name(session: AsyncSession, iata: str) -> str:
     stmt = select(City.name_ru).where(City.iata == iata)

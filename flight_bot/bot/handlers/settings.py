@@ -58,10 +58,10 @@ async def _show_settings(event: Message | CallbackQuery, session: AsyncSession):
     currency_label = {"RUB": "🇷🇺 Рубли (₽)", "USD": "🇺🇸 Доллары ($)", "EUR": "🇪🇺 Евро (€)"}.get(currency, currency)
 
     text = (
-        f"⚙️ Настройки\n\n"
-        f"📋 Активных подписок: {count}/10\n"
-        f"💱 Валюта: {currency_label}\n"
-        f"🌙 Тихий режим: {quiet_label}"
+        f"⚙️ <b>Настройки</b>\n\n"
+        f"📋 <b>Активных подписок:</b> {count}/10\n"
+        f"💱 <b>Валюта:</b> {currency_label}\n"
+        f"🌙 <b>Тихий режим:</b> {quiet_label}"
     )
     rows = [
         [InlineKeyboardButton(text="💱 Валюта", callback_data="currency_menu")],
@@ -73,9 +73,9 @@ async def _show_settings(event: Message | CallbackQuery, session: AsyncSession):
     kb = InlineKeyboardMarkup(inline_keyboard=rows)
 
     if isinstance(event, CallbackQuery):
-        await event.message.edit_text(text, reply_markup=kb)
+        await event.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     else:
-        await event.answer(text, reply_markup=kb)
+        await event.answer(text, reply_markup=kb, parse_mode="HTML")
 
 
 @router.callback_query(F.data == "currency_menu")

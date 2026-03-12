@@ -1,12 +1,14 @@
 """Онбординг: /start."""
 
+import difflib
 import logging
+import re
 
 from aiogram import F, Router
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.inline import add_first_subscription, main_menu
@@ -52,16 +54,64 @@ async def cb_main_menu(callback: CallbackQuery):
     await callback.message.edit_text("Выберите действие:", reply_markup=main_menu())
 
 
-# Алиасы: популярные названия, которые пользователи вводят, но которые
-# не совпадают точно с названием города в базе.
+# Алиасы: всё что пользователи вводят вместо официального названия города.
+# Ключи — в нижнем регистре. Значения — IATA-код города.
 CITY_ALIASES: dict[str, str] = {
+    # Разговорные названия (кириллица)
     "бали": "DPS",
+    "питер": "LED",
+    "мск": "MOW",
+    "екб": "SVX",
+    "нск": "OVB",
+    "крд": "KRR",
+    "новосиб": "OVB",
+    "сочи": "AER",
+    "владик": "VVO",
+    "хаб": "KHV",
+    # IATA-коды (пользователи часто знают код)
+    "led": "LED",
+    "mow": "MOW",
+    "svo": "MOW",
+    "dme": "MOW",
+    "vko": "MOW",
+    "ovb": "OVB",
+    "svx": "SVX",
+    "krr": "KRR",
+    "aer": "AER",
+    "dps": "DPS",
+    "bkk": "BKK",
+    "dxb": "DXB",
+    "ist": "IST",
+    "hkt": "HKT",
+    "kul": "KUL",
+    "sin": "SIN",
+    "tbs": "TBS",
+    "evn": "EVN",
+    "ala": "ALA",
+    "tse": "NQZ",
+    "cgk": "CGK",
+    "cmb": "CMB",
+    "bom": "BOM",
+    "del": "DEL",
+    "pek": "BJS",
+    "pvg": "SHA",
+    "nrt": "TYO",
+    "icn": "SEL",
+    "hnd": "TYO",
 }
+
+
+def _normalize_query(query: str) -> str:
+    """Нормализовать запрос: нижний регистр, пробел вместо дефиса."""
+    return query.strip().lower().replace("-", " ")
 
 
 async def search_cities(session: AsyncSession, query: str) -> list[City]:
     """Поиск городов по названию города и названиям аэропортов."""
-    alias_iata = CITY_ALIASES.get(query.strip().lower())
+    normalized = _normalize_query(query)
+
+    # 1. Алиасы (никнеймы, IATA-коды, сокращения)
+    alias_iata = CITY_ALIASES.get(normalized) or CITY_ALIASES.get(query.strip().lower())
     if alias_iata:
         stmt = select(City).where(City.iata == alias_iata)
         result = await session.execute(stmt)
@@ -69,19 +119,32 @@ async def search_cities(session: AsyncSession, query: str) -> list[City]:
         if city:
             return [city]
 
-    stmt = select(City).where(
-        (City.name_ru.ilike(f"%{query}%")) | (City.name_en.ilike(f"%{query}%"))
-    )
+    # 2. Поиск с нормализацией пробел/дефис
+    queries = {query, normalized, query.strip().lower().replace(" ", "-")}
+
+    conditions = []
+    for q in queries:
+        conditions += [
+            City.name_ru.ilike(f"%{q}%"),
+            City.name_en.ilike(f"%{q}%"),
+        ]
+
+    stmt = select(City).where(or_(*conditions))
     result = await session.execute(stmt)
     cities_by_name = result.scalars().all()
+
+    # 3. Поиск по аэропортам
+    airport_conditions = []
+    for q in queries:
+        airport_conditions += [
+            Airport.name_ru.ilike(f"%{q}%"),
+            Airport.name_en.ilike(f"%{q}%"),
+        ]
 
     stmt = (
         select(City)
         .join(Airport, Airport.city_iata == City.iata)
-        .where(
-            (Airport.name_ru.ilike(f"%{query}%"))
-            | (Airport.name_en.ilike(f"%{query}%"))
-        )
+        .where(or_(*airport_conditions))
     )
     result = await session.execute(stmt)
     cities_by_airport = result.scalars().all()
@@ -93,3 +156,47 @@ async def search_cities(session: AsyncSession, query: str) -> list[City]:
             seen.add(c.iata)
             cities.append(c)
     return cities
+
+
+async def suggest_cities(session: AsyncSession, query: str) -> list[City]:
+    """Нечёткий поиск когда точный поиск не дал результатов.
+
+    Стратегии:
+    1. Префикс каждого слова (для "Санкт-Питербург" → "Санкт%")
+    2. Короткий префикс всего запроса (для "Бангок" → "Банг%")
+    Результаты ранжируются по сходству через difflib.
+    """
+    words = re.split(r"[\s\-]+", query.strip())
+    short_prefix = query[:max(3, len(query) - 2)]
+
+    patterns: set[str] = set()
+    for word in words:
+        if len(word) >= 3:
+            patterns.add(f"{word}%")
+    if len(short_prefix) >= 3:
+        patterns.add(f"{short_prefix}%")
+
+    if not patterns:
+        return []
+
+    conditions = [City.name_ru.ilike(p) for p in patterns]
+    stmt = select(City).where(or_(*conditions)).limit(20)
+    result = await session.execute(stmt)
+    candidates = list(result.scalars().all())
+
+    if not candidates:
+        return []
+
+    seen: set[str] = set()
+    unique = []
+    for c in candidates:
+        if c.iata not in seen:
+            seen.add(c.iata)
+            unique.append(c)
+
+    scored = sorted(
+        unique,
+        key=lambda c: difflib.SequenceMatcher(None, query.lower(), c.name_ru.lower()).ratio(),
+        reverse=True,
+    )
+    return scored[:5]
