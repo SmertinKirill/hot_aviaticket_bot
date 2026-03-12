@@ -231,7 +231,14 @@ async def monitor_cycle(bot: Bot) -> None:
 
             async def _fetch_route(o: str, dest: str, df: str | None, dt: str | None, curr: str) -> list[dict]:
                 async with _sem:
-                    return await get_route_tickets(o, dest, df, dt, currency=curr.lower())
+                    month_from = df[:7] if df else None
+                    month_to = dt[:7] if dt else None
+                    if month_from and month_to and month_from != month_to:
+                        # Диапазон переходит через месяц — два запроса, клиентский фильтр склеит
+                        r1 = await get_route_tickets(o, dest, df, dt, departure_month=month_from, currency=curr.lower())
+                        r2 = await get_route_tickets(o, dest, df, dt, departure_month=month_to, currency=curr.lower())
+                        return r1 + r2
+                    return await get_route_tickets(o, dest, df, dt, departure_month=month_from, currency=curr.lower())
 
             async def _fetch_country(o: str, cc: str, month: str, curr: str) -> list[dict]:
                 async with _sem:

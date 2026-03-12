@@ -829,9 +829,14 @@ async def _get_reference_price(
         return None
 
     try:
-        tickets = await get_route_tickets(
-            origin_iata, dest_codes[0], date_from, date_to, currency=currency.lower()
-        )
+        month_from = date_from[:7] if date_from else None
+        month_to = date_to[:7] if date_to else None
+        if month_from and month_to and month_from != month_to:
+            r1 = await get_route_tickets(origin_iata, dest_codes[0], date_from, date_to, departure_month=month_from, currency=currency.lower())
+            r2 = await get_route_tickets(origin_iata, dest_codes[0], date_from, date_to, departure_month=month_to, currency=currency.lower())
+            tickets = r1 + r2
+        else:
+            tickets = await get_route_tickets(origin_iata, dest_codes[0], date_from, date_to, departure_month=month_from, currency=currency.lower())
     except Exception:
         return None
 

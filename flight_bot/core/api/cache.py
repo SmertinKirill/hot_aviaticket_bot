@@ -32,21 +32,6 @@ async def set_prices(origin_iata: str, data: list[dict]) -> None:
     await r.set(key, json.dumps(data, ensure_ascii=False), ex=1800)
 
 
-async def get_global_min(origin: str, dest: str) -> int | None:
-    r = await get_redis()
-    key = f"global_min:{origin}:{dest}"
-    data = await r.get(key)
-    if data is None:
-        return None
-    return int(data)
-
-
-async def set_global_min(origin: str, dest: str, price: int) -> None:
-    r = await get_redis()
-    key = f"global_min:{origin}:{dest}"
-    await r.set(key, str(price), ex=86400)  # 24 часа
-
-
 async def close() -> None:
     global _pool
     if _pool is not None:
