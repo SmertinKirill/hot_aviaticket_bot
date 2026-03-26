@@ -288,30 +288,42 @@ async def monitor_cycle(bot: Bot) -> None:
                     await asyncio.gather(*country_coros.values()),
                 ))
 
-                # --- Собираем тикеты ---
+                # --- Собираем тикеты с пометкой валюты ---
+                # Тикеты от разных подписок могут быть в разных валютах,
+                # поэтому помечаем каждый тикет валютой запроса.
                 extra_tickets: list[dict] = []
                 for sub in subs:
                     currency = sub.currency or "RUB"
                     if sub.dest_type == "city" and sub.date_from is not None:
                         key = (sub.dest_code, sub.date_from, sub.date_to, currency)
-                        extra_tickets.extend(city_results.get(key, []))
+                        tickets = city_results.get(key, [])
+                        for t in tickets:
+                            t.setdefault("_currency", currency)
+                        extra_tickets.extend(tickets)
                     elif sub.dest_type in ("country", "region"):
                         ccs = [sub.dest_code] if sub.dest_type == "country" else REGIONS.get(sub.dest_code, [])
                         month_key = sub.date_from.strftime("%Y-%m") if sub.date_from else ""
                         for cc in ccs:
-                            extra_tickets.extend(country_results.get((cc, month_key, currency), []))
+                            tickets = country_results.get((cc, month_key, currency), [])
+                            for t in tickets:
+                                t.setdefault("_currency", currency)
+                            extra_tickets.extend(tickets)
 
                 all_tickets = extra_tickets
 
                 # Проверить подписки
                 for sub in subs:
                     destinations = await resolve_destinations(sub, session)
+                    sub_currency = sub.currency or "RUB"
 
                     for dest in destinations:
                         # Находим самый дешёвый подходящий тикет прямо в памяти
+                        # Фильтруем по валюте чтобы не смешивать USD/RUB/EUR тикеты
                         matching = [
                             t for t in all_tickets
-                            if t["destination_iata"] == dest and ticket_matches(sub, t)
+                            if t["destination_iata"] == dest
+                            and t.get("_currency", sub_currency) == sub_currency
+                            and ticket_matches(sub, t)
                         ]
                         if not matching:
                             continue
