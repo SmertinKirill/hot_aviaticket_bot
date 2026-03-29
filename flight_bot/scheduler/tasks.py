@@ -5,7 +5,7 @@ import logging
 from datetime import date, datetime, timedelta
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramRetryAfter
+from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -111,8 +111,11 @@ def _is_quiet_time(quiet_from: int, quiet_to: int, tz_offset: int = 3) -> bool:
 
 async def _send_notification(
     bot: Bot, telegram_id: int, deal: dict, session: AsyncSession
-) -> bool:
-    """Отправить уведомление о горящем билете. Возвращает True при успехе."""
+) -> bool | None:
+    """Отправить уведомление о горящем билете.
+
+    Returns True при успехе, False при прочей ошибке, None если бот заблокирован.
+    """
     deal["ticket_link"] = await shorten_link(deal["ticket_link"])
 
     origin_name = await _get_city_name(deal["origin_iata"], session)
@@ -195,6 +198,21 @@ async def _send_notification(
         except Exception as e2:
             logger.error("Ошибка отправки после retry user=%d: %s", telegram_id, e2)
             return False
+    except TelegramForbiddenError as e:
+        logger.warning(
+            "Доставка невозможна telegram_id=%d: %s — деактивируем подписки",
+            telegram_id, e,
+        )
+        await session.execute(
+            update(Subscription)
+            .where(
+                Subscription.user_id == select(User.id).where(User.telegram_id == telegram_id).scalar_subquery(),
+                Subscription.is_active.is_(True),
+            )
+            .values(is_active=False)
+        )
+        await session.commit()
+        return None
     except Exception as e:
         logger.error("Ошибка отправки уведомления user=%d: %s", telegram_id, e)
         return False
@@ -225,6 +243,7 @@ async def monitor_cycle(bot: Bot) -> None:
 
             total_routes = 0
             total_deals = 0
+            blocked_tg_ids: set[int] = set()
 
             # Семафор: не более 5 параллельных запросов (~200 req/min при avg 1.5 сек)
             _sem = asyncio.Semaphore(5)
@@ -313,6 +332,8 @@ async def monitor_cycle(bot: Bot) -> None:
 
                 # Проверить подписки
                 for sub in subs:
+                    if sub.user.telegram_id in blocked_tg_ids:
+                        continue
                     destinations = await resolve_destinations(sub, session)
                     sub_currency = sub.currency or "RUB"
 
@@ -354,6 +375,9 @@ async def monitor_cycle(bot: Bot) -> None:
                             sent = await _send_notification(
                                 bot, sub.user.telegram_id, deal, session
                             )
+                            if sent is None:
+                                blocked_tg_ids.add(sub.user.telegram_id)
+                                break
                             if sent:
                                 await notif_repo.create(
                                     subscription_id=deal["subscription_id"],
