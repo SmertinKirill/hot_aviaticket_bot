@@ -81,10 +81,28 @@ def _back_kb(cb: str) -> InlineKeyboardMarkup:
     ]])
 
 
-def _origin_reply_kb() -> ReplyKeyboardMarkup:
+def _origin_reply_kb(
+    user_origins: list[str] | None = None,
+) -> ReplyKeyboardMarkup:
+    """Build reply keyboard: user's recent origins first, then popular (no dupes)."""
+    seen: set[str] = set()
+    combined: list[str] = []
+
+    for name in (user_origins or []):
+        if name not in seen:
+            seen.add(name)
+            combined.append(name)
+
+    for name in _POPULAR_ORIGINS:
+        if name not in seen:
+            seen.add(name)
+            combined.append(name)
+
+    combined = combined[:6]
+
     buttons = [
-        [KeyboardButton(text=city) for city in _POPULAR_ORIGINS[:3]],
-        [KeyboardButton(text=city) for city in _POPULAR_ORIGINS[3:]],
+        [KeyboardButton(text=city) for city in combined[:3]],
+        [KeyboardButton(text=city) for city in combined[3:]],
     ]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True, one_time_keyboard=True)
 
@@ -99,9 +117,12 @@ async def cmd_subscribe(message: Message, state: FSMContext, session: AsyncSessi
         await message.answer("Сначала выполните /start")
         return
     logger.info("%s: начало создания подписки", _fmt_user(message.from_user))
+    sub_repo = SubscriptionRepository(session)
+    user_origins = await sub_repo.get_user_origin_cities(user.id)
+    origin_names = [name for _, name in user_origins]
     await message.answer(
         "Введите полное название города вылета на русском языке:",
-        reply_markup=_origin_reply_kb(),
+        reply_markup=_origin_reply_kb(origin_names),
     )
     await state.set_state(SubscribeStates.waiting_for_origin_city)
 
@@ -114,10 +135,13 @@ async def cb_subscribe(callback: CallbackQuery, state: FSMContext, session: Asyn
         await callback.answer("Сначала выполните /start")
         return
     await callback.answer()
+    sub_repo = SubscriptionRepository(session)
+    user_origins = await sub_repo.get_user_origin_cities(user.id)
+    origin_names = [name for _, name in user_origins]
     await callback.message.edit_text("Выбор города вылета:")
     await callback.message.answer(
         "Введите полное название города вылета на русском языке:",
-        reply_markup=_origin_reply_kb(),
+        reply_markup=_origin_reply_kb(origin_names),
     )
     await state.set_state(SubscribeStates.waiting_for_origin_city)
 
@@ -140,7 +164,17 @@ async def process_origin_city_input(
                     btn.callback_data = f"sub_origin_pick:{iata}"
             await message.answer("Город не найден. Возможно, вы имели в виду:", reply_markup=kb)
         else:
-            await message.answer("Город не найден. Попробуйте ещё раз:", reply_markup=_origin_reply_kb())
+            user_repo = UserRepository(session)
+            user = await user_repo.get_by_telegram_id(message.from_user.id)
+            user_origin_names: list[str] = []
+            if user:
+                sub_repo = SubscriptionRepository(session)
+                rows = await sub_repo.get_user_origin_cities(user.id)
+                user_origin_names = [name for _, name in rows]
+            await message.answer(
+                "Город не найден. Попробуйте ещё раз:",
+                reply_markup=_origin_reply_kb(user_origin_names),
+            )
         return
 
     remove_kb = ReplyKeyboardRemove()

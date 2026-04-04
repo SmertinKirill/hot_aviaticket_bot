@@ -4,7 +4,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from core.db.models import Subscription, User
+from core.db.models import City, Subscription, User
 
 
 class SubscriptionRepository:
@@ -133,6 +133,18 @@ class SubscriptionRepository:
         )
         result = await self.session.execute(stmt)
         return result.scalar_one()
+
+    async def get_user_origin_cities(self, user_id: int) -> list[tuple[str, str]]:
+        """Return distinct (iata, name_ru) pairs for origins the user has used."""
+        stmt = (
+            select(Subscription.origin_iata, City.name_ru)
+            .join(City, City.iata == Subscription.origin_iata)
+            .where(Subscription.user_id == user_id)
+            .group_by(Subscription.origin_iata, City.name_ru)
+            .order_by(func.count().desc())
+        )
+        result = await self.session.execute(stmt)
+        return list(result.all())
 
     async def has_any(self, user_id: int) -> bool:
         stmt = select(func.count()).where(Subscription.user_id == user_id)
